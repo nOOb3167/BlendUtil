@@ -60,6 +60,15 @@ def run():
     mkNodeMatrix(p, [mIdentity, mIdentity, mIdentity])
     mkSect(p, b"HELLO", b"datadata")
     print(p.l)
+    
+    return p
 
 if __name__ == '__main__':
-    run()
+    p = run()
+
+    import sys
+    if len(sys.argv) == 2:
+        fname = str(sys.argv[1])
+        assert fname.endswith('.dat')
+        with open(fname, 'wb') as f:
+            f.write(p.getBytes())
