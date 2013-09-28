@@ -2,23 +2,24 @@
 
 from struct import pack as sPack, unpack as sUnpack, error as sError
 
-print('hello')
-
 class P:
     def __init__(self):
         self.l = []
 
     def append(self, s):
         self.l.append(s)
-        
+
     def merge(self, otherP):
         self.l.extend(otherP.l)
-    
+
     def getBytes(self):
         return b"".join(self.l)
 
 def mkInt32(p, i):
     p.append(sPack('<i', i))
+
+def mkFloat(p, f):
+    p.append(sPack('<f', f))
 
 def mkMatrix4x4(p, m):
     assert len(m) == 16
@@ -31,42 +32,69 @@ def mkSect(p, name, data):
     p.append(sPack('<iii%ds%ds' % (len(name), len(data)),
         4+4+4+len(name)+len(data), len(name), len(data), name, data))
 
-def mkNodeName(p, lName):
-    pName = P()
-    for n in lName:
-        mkLendel(pName, n)
-    mkSect(p, b"NODENAME", pName.getBytes())
+def mkLenDelSec(p, bSecName, lStr):
+    pW = P()
+    for n in lStr:
+        mkLendel(pW, n)
+    mkSect(p, bSecName, pW.getBytes())
 
-def mkNodeChild(p, lChild):
-    pChild = P()
-    for c in lChild:
-        mkInt32(pChild, c)
-    mkSect(p, b"NODECHILD", pChild.getBytes())
+def mkIntSec(p, bSecName, lInt):
+    pW = P()
+    for n in lInt:
+        mkInt32(pW, n)
+    mkSect(p, bSecName, pW.getBytes())
 
-def mkNodeMatrix(p, lMtx):
-    pMtx = P()
-    for m in lMtx:
-        mkMatrix4x4(pMtx, m)
-    mkSect(p, b"NODEMATRIX", pMtx.getBytes())
-    
+def mkListFloatSec(p, bSecName, llFloat):
+    pW = P()
+    for m in llFloat:
+        pX = P()
+        for n in m:
+            mkFloat(pX, n)
+        mkLendel(pW, pX.getBytes())
+    mkSect(p, bSecName, pW.getBytes())
+
+def mkMatrixSec(p, bSecName, lMtx):
+    pW = P()
+    for n in lMtx:
+        mkMatrix4x4(pW, n)
+    mkSect(p, bSecName, pW.getBytes())
+
 def run():
     p = P()
-    mkNodeName(p, [b'Hello', b'Abcd', b'ExampleName'])
-    mkNodeChild(p, [-1, 0, 1])
+
     mIdentity = [1.0, 0.0, 0.0, 0.0,
                  0.0, 1.0, 0.0, 0.0,
                  0.0, 0.0, 1.0, 0.0,
                  0.0, 0.0, 0.0, 1.0]
-    mkNodeMatrix(p, [mIdentity, mIdentity, mIdentity])
+
+    mkLenDelSec(p, b"NODENAME", [b'Hello', b'Abcd', b'ExampleName'])
+    mkIntSec(p, b"NODECHILD", [-1, 0, 1])
+    mkMatrixSec(p, b"NODEMATRIX", [mIdentity, mIdentity, mIdentity])
+
+    mkIntSec(p, b"NODEMESH", [0, -1, -1])
+
+    mkLenDelSec(p, b"BONENAME", [b'Hello'])
+    mkIntSec(p, b"BONECHILD", [-1])
+    mkMatrixSec(p, b"BONEMATRIX", [mIdentity])
+
+    mkLenDelSec(p, b"MESHNAME", [b'Mesh0'])
+    mkListFloatSec(p, b"MESHVERT",
+        [[0.0, 0.0, 0.0,
+         1.0, 0.0, 0.0,
+         1.0, 1.0, 0.0,]])
+
     mkSect(p, b"HELLO", b"datadata")
+
     print(p.l)
-    
+
     return p
 
 if __name__ == '__main__':
     p = run()
 
     import sys
+    if len(sys.argv) == 1:
+        print("### NOT OUTPUTTING TO FILE ###")
     if len(sys.argv) == 2:
         fname = str(sys.argv[1])
         assert fname.endswith('.dat')
