@@ -22,7 +22,7 @@ class slice_str_t {};
 class slice_reslice_abs_t {};
 class slice_reslice_rel_t {};
 
-struct DMatrix {
+struct DMat {
 	float d[16];
 };
 
@@ -88,7 +88,7 @@ public:
 	}
 
 	bool CheckIntArbitraryLimit(int i) {
-		return i >= 0 && i <= 1024 * 1024;
+		return i == -1 || (i >= 0 && i <= 1024 * 1024);
 	}
 
 	void AdvanceN(int n) {
@@ -136,9 +136,9 @@ public:
 
 		assert(w.BytesLeft() >= 4);
 
-		int    len  = ReadInt();
+		int    len  = w.ReadInt();
 		assert(CheckIntArbitraryLimit(len));
-		string data = ReadString(len);
+		string data = w.ReadString(len);
 
 		return (*this = w, data);
 	}
@@ -169,13 +169,13 @@ class SectionData {
 public:
 	vector<string> nodeName;
 	vector<int>    nodeChild;
-	vector<DMatrix> nodeMatrix;
+	vector<DMat> nodeMatrix;
 
 	vector<int> nodeMesh;
 
 	vector<string> boneName;
 	vector<int>    boneChild;
-	vector<DMatrix> boneMatrix;
+	vector<DMat> boneMatrix;
 
 	vector<string> meshName;
 	vector<vector<DVec3> > meshVert;
@@ -212,21 +212,39 @@ public:
 
 	static void ListSectionPostfix(const P &inP) {
 		vector<Section> sec = ReadSection(inP);
+
+		SectionData sd;
+		FillSectionData(sec, &sd);
 	}
 
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
-		FillLenDel(SectionGetByName(sec, "NODENAME"), &outSD->nodeName);
-		FillInt(SectionGetByName(sec, "NODECHILD"), &outSD->nodeChild);
-		FillMatrix(SectionGetByName(sec, "NODEMATRIX"), &outSD->nodeMatrix);
+		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
+		FillInt(SectionGetByName(sec, "NODECHILD").data, &outSD->nodeChild);
+		FillMat(SectionGetByName(sec, "NODEMATRIX").data, &outSD->nodeMatrix);
 
-		FillLenDel(SectionGetByName(sec, "BONENAME"), &outSD->boneName);
-		FillInt(SectionGetByName(sec, "BONECHILD"), &outSD->boneChild);
-		FillMatrix(SectionGetByName(sec, "BONEMATRIX"), &outSD->boneMatrix);
+		FillInt(SectionGetByName(sec, "NODEMESH").data, &outSD->nodeMesh);
+
+		FillLenDel(SectionGetByName(sec, "BONENAME").data, &outSD->boneName);
+		FillInt(SectionGetByName(sec, "BONECHILD").data, &outSD->boneChild);
+		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
+
+		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
+
+		vector<string>         mVertChunks;
+		vector<vector<DVec3> > mVert;
+		FillLenDel(SectionGetByName(sec, "MESHVERT").data, &mVertChunks);
+		for (int i = 0; i < mVertChunks.size(); i++) {
+			vector<DVec3> v;
+			FillVec3(Slice(slice_str_t(), mVertChunks[i]), &v);
+			mVert.push_back(v);
+		}
+		outSD->meshVert = mVert;
+			
 	}
 
-	static void FillInt(const Section &sec, vector<int> *outVS) {
+	static void FillInt(const Slice &sec, vector<int> *outVS) {
 		int bleft;
-		P w(sec.data);
+		P w(sec);
 
 		vector<int> vS;
 
@@ -237,9 +255,9 @@ public:
 		*outVS = vS;
 	}
 
-	static void FillLenDel(const Section &sec, vector<string> *outVS) {
+	static void FillLenDel(const Slice &sec, vector<string> *outVS) {
 		int bleft;
-		P w(sec.data);
+		P w(sec);
 
 		vector<string> vS;
 
@@ -250,20 +268,40 @@ public:
 		*outVS = vS;
 	}
 
-	static void FillMatrix(const Section &sec, vector<DMatrix> *outVS) {
+	static void FillVec3(const Slice &sec, vector<DVec3> *outVS) {
 		int bleft;
-		P w(sec.data);
+		P w(sec);
 
-		vector<DMatrix> vS;
+		vector<DVec3> vS;
 
 		while ((bleft = w.BytesLeft()) != 0) {
-			DMatrix m;
+			DVec3 m;
+
+			assert(w.BytesLeft() >= 3*4);
+
+			for (int i = 0; i < 3; i++)
+				m.d[i] = w.ReadFloat();
+
+			vS.push_back(m);
+		}
+
+		*outVS = vS;
+	}
+
+	static void FillMat(const Slice &sec, vector<DMat> *outVS) {
+		int bleft;
+		P w(sec);
+
+		vector<DMat> vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			DMat m;
 
 			assert(w.BytesLeft() >= 16*4);
 
 			for (int i = 0; i < 16; i++)
 				m.d[i] = w.ReadFloat();
-				
+
 			vS.push_back(m);
 		}
 
