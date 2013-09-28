@@ -9,14 +9,26 @@
 #include <string>
 #include <vector>
 
+#include <exception>
+
 using namespace std;
 
 // P : Slice
 // Section : Name Slice
 
+class ExcItemExist : public exception {};
+
 class slice_str_t {};
 class slice_reslice_abs_t {};
 class slice_reslice_rel_t {};
+
+struct DMatrix {
+	float d[16];
+};
+
+struct DVec3 {
+	float d[3];
+};
 
 class Slice {
 	int beg, end;
@@ -31,7 +43,7 @@ public:
 	}
 
 	bool Check() const {
-		return beg >= 0 && beg <= end && end <= s->size();
+		return beg >= 0 && beg <= end && end <= (long)s->size();
 	}
 
 	bool CheckRelRange(int rel) const {
@@ -67,6 +79,7 @@ class P {
 	Slice s;
 public:
 	P(const string &s) : p(0), s(slice_str_t(), s) {}
+	P(const Slice &s) : p(0), s(s) {}
 	P(const P &other) : p(other.p), s(other.s) {}
 	~P() {}
 
@@ -97,8 +110,17 @@ public:
 
 		assert(CheckIntArbitraryLimit(uni.i));
 
-		AdvanceInt();
-		return uni.i;
+		return (AdvanceInt(), uni.i);
+	}
+
+	float ReadFloat() {
+		assert(BytesLeft() >= 4);
+
+		/* FIXME: Yes the union thing */
+		union { float f; char c[4]; } uni;
+		memcpy(&uni.c, s.CharPtrRel(p), 4);
+
+		return (AdvanceN(4), uni.f);
 	}
 
 	string ReadString(int n) {
@@ -106,14 +128,25 @@ public:
 
 		string ret(s.CharPtrRel(p), n);
 
-		AdvanceN(n);
-		return ret;
+		return (AdvanceN(n), ret);
+	}
+
+	string ReadLenDel() {
+		P w(*this);
+
+		assert(w.BytesLeft() >= 4);
+
+		int    len  = ReadInt();
+		assert(CheckIntArbitraryLimit(len));
+		string data = ReadString(len);
+
+		return (*this = w, data);
 	}
 
 	Section ReadSectionWeak() {
 		P w(*this);
 
-		assert (w.BytesLeft() >= 4+4+4);
+		assert(w.BytesLeft() >= 4+4+4);
 
 		int lenTotal, lenName, lenData;
 
@@ -128,24 +161,113 @@ public:
 		name = w.ReadString(lenName);
 		data = w.ReadString(lenData);
 
-		*this = w;
-
-		return Section(name, Slice(slice_str_t(), data));
+		return (*this = w, Section(name, Slice(slice_str_t(), data)));
 	}
+};
+
+class SectionData {
+public:
+	vector<string> nodeName;
+	vector<int>    nodeChild;
+	vector<DMatrix> nodeMatrix;
+
+	vector<int> nodeMesh;
+
+	vector<string> boneName;
+	vector<int>    boneChild;
+	vector<DMatrix> boneMatrix;
+
+	vector<string> meshName;
+	vector<vector<DVec3> > meshVert;
 };
 
 class Parse {
 public:
-	static void ListSectionPostfix(const P &inP) {
-		P w(inP);
-
+	static vector<Section> ReadSection(const P &inP) {
 		vector<Section> sec;
+		P w(inP);
 
 		int bleft = w.BytesLeft() + 1;
 
 		while (w.BytesLeft() < bleft && (bleft = w.BytesLeft()) != 0) {
 			sec.push_back(Section(w.ReadSectionWeak()));
 		}
+
+		return sec;
+	}
+
+	static bool SectionExistByName(const vector<Section> &sec, const string &name) {
+		for (auto &i : sec)
+			if (i.name == name)
+				return true;
+		return false;
+	}
+
+	static Section SectionGetByName(const vector<Section> &sec, const string &name) {
+		for (auto &i : sec)
+			if (i.name == name)
+				return i;
+		throw ExcItemExist();
+	}
+
+	static void ListSectionPostfix(const P &inP) {
+		vector<Section> sec = ReadSection(inP);
+	}
+
+	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
+		FillLenDel(SectionGetByName(sec, "NODENAME"), &outSD->nodeName);
+		FillInt(SectionGetByName(sec, "NODECHILD"), &outSD->nodeChild);
+		FillMatrix(SectionGetByName(sec, "NODEMATRIX"), &outSD->nodeMatrix);
+
+		FillLenDel(SectionGetByName(sec, "BONENAME"), &outSD->boneName);
+		FillInt(SectionGetByName(sec, "BONECHILD"), &outSD->boneChild);
+		FillMatrix(SectionGetByName(sec, "BONEMATRIX"), &outSD->boneMatrix);
+	}
+
+	static void FillInt(const Section &sec, vector<int> *outVS) {
+		int bleft;
+		P w(sec.data);
+
+		vector<int> vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			vS.push_back(w.ReadInt());
+		}
+
+		*outVS = vS;
+	}
+
+	static void FillLenDel(const Section &sec, vector<string> *outVS) {
+		int bleft;
+		P w(sec.data);
+
+		vector<string> vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			vS.push_back(w.ReadLenDel());
+		}
+
+		*outVS = vS;
+	}
+
+	static void FillMatrix(const Section &sec, vector<DMatrix> *outVS) {
+		int bleft;
+		P w(sec.data);
+
+		vector<DMatrix> vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			DMatrix m;
+
+			assert(w.BytesLeft() >= 16*4);
+
+			for (int i = 0; i < 16; i++)
+				m.d[i] = w.ReadFloat();
+				
+			vS.push_back(m);
+		}
+
+		*outVS = vS;
 	}
 };
 
