@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace std;
 
@@ -127,6 +128,8 @@ public:
 		name = w.ReadString(lenName);
 		data = w.ReadString(lenData);
 
+		*this = w;
+
 		return Section(name, Slice(slice_str_t(), data));
 	}
 };
@@ -136,7 +139,13 @@ public:
 	static void ListSectionPostfix(const P &inP) {
 		P w(inP);
 
-		Section sec(w.ReadSectionWeak());
+		vector<Section> sec;
+
+		int bleft = w.BytesLeft() + 1;
+
+		while (w.BytesLeft() < bleft && (bleft = w.BytesLeft()) != 0) {
+			sec.push_back(Section(w.ReadSectionWeak()));
+		}
 	}
 };
 
