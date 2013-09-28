@@ -168,17 +168,24 @@ public:
 class SectionData {
 public:
 	vector<string> nodeName;
-	vector<int>    nodeChild;
+	vector<int>    nodeParent;
 	vector<DMat> nodeMatrix;
 
 	vector<int> nodeMesh;
 
 	vector<string> boneName;
-	vector<int>    boneChild;
+	vector<int>    boneParent;
 	vector<DMat> boneMatrix;
 
 	vector<string> meshName;
-	vector<vector<DVec3> > meshVert;
+	vector<vector<float> > meshVert;
+
+	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
+};
+
+class SectionDataEx : public SectionData {
+	vector<vector<int> > nodeChild;
+	vector<vector<int> > boneChild;
 };
 
 class Parse {
@@ -219,27 +226,53 @@ public:
 
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
 		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
-		FillInt(SectionGetByName(sec, "NODECHILD").data, &outSD->nodeChild);
+		FillInt(SectionGetByName(sec, "NODEPARENT").data, &outSD->nodeParent);
 		FillMat(SectionGetByName(sec, "NODEMATRIX").data, &outSD->nodeMatrix);
 
 		FillInt(SectionGetByName(sec, "NODEMESH").data, &outSD->nodeMesh);
 
 		FillLenDel(SectionGetByName(sec, "BONENAME").data, &outSD->boneName);
-		FillInt(SectionGetByName(sec, "BONECHILD").data, &outSD->boneChild);
+		FillInt(SectionGetByName(sec, "BONEPARENT").data, &outSD->boneParent);
 		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
 
 		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
 
-		vector<string>         mVertChunks;
-		vector<vector<DVec3> > mVert;
-		FillLenDel(SectionGetByName(sec, "MESHVERT").data, &mVertChunks);
-		for (int i = 0; i < mVertChunks.size(); i++) {
-			vector<DVec3> v;
-			FillVec3(Slice(slice_str_t(), mVertChunks[i]), &v);
-			mVert.push_back(v);
+		{
+			vector<string>         mVertChunks;
+			vector<vector<float> > mVert;
+			FillLenDel(SectionGetByName(sec, "MESHVERT").data, &mVertChunks);
+			for (int i = 0; i < mVertChunks.size(); i++) {
+				vector<float> v;
+				FillFloat(Slice(slice_str_t(), mVertChunks[i]), &v);
+				assert(v.size() % 3 == 0 && v.size() % 9 == 0);
+				mVert.push_back(v);
+			}
+			outSD->meshVert = mVert;
 		}
-		outSD->meshVert = mVert;
-			
+
+		{
+			int numMesh = outSD->meshName.size();
+			int numBone = outSD->boneName.size();
+
+			vector<string> mBWChunks;
+			vector<vector<vector<pair<int, float> > > > mBWeight;
+
+			FillLenDel(SectionGetByName(sec, "MESHBONEWEIGHT").data, &mBWChunks);
+			assert(mBWChunks.size() == outSD->meshName.size() * outSD->boneName.size());
+
+			mBWeight = vector<vector<vector<pair<int, float> > > >(numMesh);
+			for (auto &i : mBWeight)
+				i = vector<vector<pair<int, float> > >(numBone);
+
+			for (int m = 0; m < numMesh; m++)
+				for (int b = 0; b < numBone; b++) {
+					vector<pair<int, float> > v;
+					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[(numMesh * m) + b]), &v);
+					mBWeight[m][b] = v;
+				}
+
+			outSD->meshBoneWeight = mBWeight;
+		}
 	}
 
 	static void FillInt(const Slice &sec, vector<int> *outVS) {
@@ -254,6 +287,36 @@ public:
 
 		*outVS = vS;
 	}
+
+	static void FillFloat(const Slice &sec, vector<float> *outVS) {
+		int bleft;
+		P w(sec);
+
+		vector<float> vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			vS.push_back(w.ReadFloat());
+		}
+
+		*outVS = vS;
+	}
+
+	static void FillPairIntFloat(const Slice &sec, vector<pair<int, float> > *outVS) {
+		int bleft;
+		P w(sec);
+
+		vector<pair<int, float> > vS;
+
+		while ((bleft = w.BytesLeft()) != 0) {
+			/* FIXME: Used to be make_pair(w.ReadInt(), w.ReadFloat), but argument evaluation order is unspecified in C++ */
+			int   i = w.ReadInt();
+			float f = w.ReadFloat();
+			vS.push_back(make_pair(i, f));
+		}
+
+		*outVS = vS;
+	}
+
 
 	static void FillLenDel(const Slice &sec, vector<string> *outVS) {
 		int bleft;

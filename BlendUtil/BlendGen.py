@@ -16,13 +16,15 @@ class P:
         return b"".join(self.l)
 
 def mkInt32(p, i):
+    assert isinstance(i, int)
     p.append(sPack('<i', i))
 
 def mkFloat(p, f):
+    assert isinstance(f, float)
     p.append(sPack('<f', f))
 
 def mkMatrix4x4(p, m):
-    assert len(m) == 16
+    assert len(m) == 16 and all([isinstance(x, float) for x in m])
     p.append(sPack('<16f', *m))
 
 def mkLendel(p, data):
@@ -53,6 +55,17 @@ def mkListFloatSec(p, bSecName, llFloat):
         mkLendel(pW, pX.getBytes())
     mkSect(p, bSecName, pW.getBytes())
 
+def mkListListPairIntFloatSec(p, bSecName, llpIF):
+    pW = P()
+    for meshID, m in enumerate(llpIF):
+        for boneID, b in enumerate(m):
+            pX = P()
+            for pairIF in b:
+                mkInt32(pX, pairIF[0])
+                mkFloat(pX, pairIF[1])
+            mkLendel(pW, pX.getBytes())
+    mkSect(p, bSecName, pW.getBytes())
+
 def mkMatrixSec(p, bSecName, lMtx):
     pW = P()
     for n in lMtx:
@@ -68,13 +81,17 @@ def run():
                  0.0, 0.0, 0.0, 1.0]
 
     mkLenDelSec(p, b"NODENAME", [b'Hello', b'Abcd', b'ExampleName'])
-    mkIntSec(p, b"NODECHILD", [-1, 0, 1])
+    mkIntSec(p, b"NODEPARENT", [-1, 0, 1])
     mkMatrixSec(p, b"NODEMATRIX", [mIdentity, mIdentity, mIdentity])
 
+    # FIXME: A particular Mesh should be assigned to only one node.
+    #        BONEWEIGHT section is mapping '(Mesh, Bone) -> [(id, weight)]'.
+    #        If Mesh 'sharing' between multiple nodes is enabled, with differing (id, weight) lists,
+    #        an indexing pair such as '(Node /*Mesh implicit*/, Bone) -> [(id, weight)]' may be required.
     mkIntSec(p, b"NODEMESH", [0, -1, -1])
 
     mkLenDelSec(p, b"BONENAME", [b'Hello'])
-    mkIntSec(p, b"BONECHILD", [-1])
+    mkIntSec(p, b"BONEPARENT", [-1])
     mkMatrixSec(p, b"BONEMATRIX", [mIdentity])
 
     mkLenDelSec(p, b"MESHNAME", [b'Mesh0'])
@@ -82,6 +99,13 @@ def run():
         [[0.0, 0.0, 0.0,
          1.0, 0.0, 0.0,
          1.0, 1.0, 0.0,]])
+    
+    mkListListPairIntFloatSec(p, b"MESHBONEWEIGHT",
+        [
+            [ # Mesh 0
+                [(0, 1.0), (2, 1.0)]
+            ]
+        ])
 
     mkSect(p, b"HELLO", b"datadata")
 
