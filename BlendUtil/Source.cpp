@@ -8,10 +8,14 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <map>
+#include <algorithm>
 
 #include <exception>
 
 using namespace std;
+
+#define BU_MAX_INFLUENCING_BONE 4
 
 // P : Slice
 // Section : Name Slice
@@ -184,8 +188,13 @@ public:
 };
 
 class SectionDataEx : public SectionData {
+public:
 	vector<vector<int> > nodeChild;
 	vector<vector<int> > boneChild;
+
+	/* [Mesh0: [Vert0: id*BU_MAX_INFLUENCING_BONE ...] ...] */
+	vector<vector<int> >   meshVertId;
+	vector<vector<float> > meshVertWt;
 };
 
 class Parse {
@@ -220,8 +229,118 @@ public:
 	static void ListSectionPostfix(const P &inP) {
 		vector<Section> sec = ReadSection(inP);
 
-		SectionData sd;
+		SectionDataEx sd;
 		FillSectionData(sec, &sd);
+		FillSectionDataExtra(&sd);
+	}
+
+	static void FillSectionDataExtra(SectionDataEx *outSD) {
+		FillChild(outSD->nodeParent, &outSD->nodeChild);
+		FillChild(outSD->boneParent, &outSD->boneChild);
+
+		FillMeshVertInfluence(outSD->meshVert, outSD->meshBoneWeight, &outSD->meshVertId, &outSD->meshVertWt);
+	}
+
+	static void FillChild(const vector<int> &inParent, vector<vector<int> > *outSD) {
+		vector<vector<int> > cAcc(inParent.size());
+
+		for (int i = 0; i < inParent.size(); i++)
+			if (inParent[i] != -1)
+				cAcc[inParent[i]].push_back(i);
+		*outSD = cAcc;	
+	}
+
+	static void FillMeshVertInfluence(
+		const vector<vector<float> > &meshVert /* Vert counts */,
+		const vector<vector<vector<pair<int, float> > > > &meshBoneWeight,
+		vector<vector<int> > *oMeshVertId,
+		vector<vector<float> > *oMeshVertWt)
+	{
+		int numMesh = meshBoneWeight.size();
+
+		vector<vector<int> >   meshVertId(numMesh);
+		vector<vector<float> > meshVertWt(numMesh);
+
+		for (int i = 0; i < numMesh; i++)
+			FillMeshVertInfluenceOne(meshVert[i], meshBoneWeight[i], &meshVertId[i], &meshVertWt[i]);
+
+		*oMeshVertId = meshVertId;
+		*oMeshVertWt = meshVertWt;
+	}
+
+	static void FillMeshVertInfluenceOne(
+		const vector<float> &meshVert /* Vert count */,
+		const vector<vector<pair<int, float> > > &boneWeight,
+		vector<int> *oMeshVertId,
+		vector<float> *oMeshVertWt)
+	{
+		int numVert = meshVert.size();
+		int numBone = boneWeight.size();
+
+		vector<int>   meshVertId(BU_MAX_INFLUENCING_BONE * numVert);
+		vector<float> meshVertWt(BU_MAX_INFLUENCING_BONE * numVert);
+
+		vector<int> curVisited(numBone, 0);
+
+		/* Sort by Ascending id */
+		vector<vector<pair<int, float> > > boneWeightSorted = boneWeight;
+		for (auto &i : boneWeightSorted)
+			sort(i.begin(), i.end(), [](pair<int, float> a, pair<int, float> b) { return a.first < b.first; });
+
+		for (int i = 0; i < numVert; i++) {
+			mInfluCounterAdvance(boneWeightSorted, i, &curVisited);
+			vector<pair<int, float> > influ = mInfluGather(boneWeight, i, curVisited);
+
+			assert(influ.size() == BU_MAX_INFLUENCING_BONE);
+			for (int j = 0; j < influ.size(); j++) {
+				meshVertId[(BU_MAX_INFLUENCING_BONE * i) + j] = influ[j].first;
+				meshVertWt[(BU_MAX_INFLUENCING_BONE * i) + j] = influ[j].second;
+			}
+		}
+
+		*oMeshVertId = meshVertId;
+		*oMeshVertWt = meshVertWt;
+	}
+
+	static void mInfluCounterAdvance(const vector<vector<pair<int, float> > > &boneWeight, int state, vector<int> *ioCurVisited) {
+		for (int i = 0; i < boneWeight.size(); i++) {
+			int &curVisited   = (*ioCurVisited)[i];
+			int  nextVisited  = curVisited + 1;
+			int  finalVisited = boneWeight[i].size();
+
+			if (curVisited < finalVisited && boneWeight[i][nextVisited].first == state)
+				curVisited += 1;
+		}
+	}
+
+	static vector<pair<int, float> > mInfluGather(const vector<vector<pair<int, float> > > &boneWeight, int state, const vector<int> &curVisited) {
+		/* Remember: In the returned pair<int, float>, int is bone number.
+		 * In boneWeight, int is vertex id instead. */
+
+		vector<int> boneCandidate;
+
+		for (int i = 0; i < boneWeight.size(); i++)
+			if (boneWeight[i][curVisited[i]].first == state)
+				boneCandidate.push_back(i);
+
+		/* Sort by Descending weight */
+		sort(boneCandidate.begin(), boneCandidate.end(),
+			[&boneWeight, &curVisited, &state](int a, int b) {
+				assert(boneWeight[a][curVisited[a]].first == state && boneWeight[b][curVisited[b]].first == state);
+				/* FIXME: Floating point comparison sync alert */
+				return boneWeight[a][curVisited[a]].second > boneWeight[b][curVisited[b]].second;
+		});
+
+		vector<pair<int, float> > finals;
+
+		for (auto &i : boneCandidate)
+			finals.push_back(make_pair(i, boneWeight[i][curVisited[i]].second));
+
+		/* Cut if have too many influencing bones, zero pad if too few */
+		if (finals.size() < BU_MAX_INFLUENCING_BONE)
+			finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
+
+		return finals;
 	}
 
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
@@ -271,7 +390,7 @@ public:
 					mBWeight[m][b] = v;
 				}
 
-			outSD->meshBoneWeight = mBWeight;
+				outSD->meshBoneWeight = mBWeight;
 		}
 	}
 
