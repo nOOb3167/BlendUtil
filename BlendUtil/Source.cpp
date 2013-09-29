@@ -274,7 +274,7 @@ public:
 		vector<int> *oMeshVertId,
 		vector<float> *oMeshVertWt)
 	{
-		int numVert = meshVert.size();
+		int numVert = mNumVertFromSize(meshVert.size());
 		int numBone = boneWeight.size();
 
 		vector<int>   meshVertId(BU_MAX_INFLUENCING_BONE * numVert);
@@ -300,6 +300,11 @@ public:
 
 		*oMeshVertId = meshVertId;
 		*oMeshVertWt = meshVertWt;
+	}
+
+	static int mNumVertFromSize(int nFloats) {
+		assert(nFloats % 3 == 0);
+		return nFloats / 3;
 	}
 
 	static void mInfluCounterAdvance(const vector<vector<pair<int, float> > > &boneWeight, int state, vector<int> *ioCurVisited) {
@@ -337,8 +342,7 @@ public:
 			finals.push_back(make_pair(i, boneWeight[i][curVisited[i]].second));
 
 		/* Cut if have too many influencing bones, zero pad if too few */
-		if (finals.size() < BU_MAX_INFLUENCING_BONE)
-			finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
+		finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
 
 		return finals;
 	}
