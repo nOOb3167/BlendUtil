@@ -175,6 +175,36 @@ def GetWeights(bid):
             llIF[inflBoneId].append([v.index, g.weight])
 
     return llIF
+
+def GetVerts(bid):
+    lVert = []
+
+    dMesh = bid.oMesh.data
+    
+    for vI, v in enumerate(dMesh.vertices):
+        assert v.index == vI
+        lVert.append([v.co[0], v.co[1], v.co[2]])
+    
+    return lVert
+
+def GetIndices(bid):
+    lIdx = []
+    
+    dMesh = bid.oMesh.data
+    
+    # FIXME: Will be using tessfaces, force recalculation if dirty
+    dMesh.update(calc_tessface=True)
+    assert not dMesh.validate()
+    
+    for f in dMesh.tessfaces:
+        assert len(f.vertices) == 3 or len(f.vertices) == 4
+        if len(f.vertices) == 3:
+            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
+        if len(f.vertices) == 4:
+            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
+            lIdx.extend([f.vertices[2], f.vertices[3], f.vertices[0]])
+            
+    return lIdx
     
 def ArmaMesh(oMesh):
     assert GetMeshArmature(oMesh) is not None
@@ -185,6 +215,8 @@ def ArmaMesh(oMesh):
     bid = BId.MakeBoneId(oMesh, lBone)
     
     wts = GetWeights(bid)
+    vts = GetVerts(bid)
+    ics = GetIndices(bid)
     
     #assert IsBoneHierarchySingleRoot(lBone)
 
