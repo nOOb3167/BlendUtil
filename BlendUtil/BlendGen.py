@@ -137,21 +137,60 @@ def IsBoneHierarchySingleRoot(lBone):
             return False
     return True
 
+def GetBoneVertexGroupIdx(oMesh, bone):
+    for g in oMesh.vertex_groups:
+        if g.name == bone.name:
+            return g.index
+    return None
+    
+class BId:
+    def __init__(self, oMesh, lBone, mapIdBone, mapBoneId, lVGIdx, mapVGIdxBoneId):
+        self.oMesh = oMesh
+        self.lBone = lBone
+        self.mapIdBone = mapIdBone
+        self.mapBoneId = mapBoneId
+        self.lVGIdx = lVGIdx
+        self.mapVGIdxBoneId = mapVGIdxBoneId
+
+    @classmethod
+    def MakeBoneId(klass, oMesh, lBone):
+        mapIdBone = dict(enumerate(lBone))
+        mapBoneId = dict([(b, a) for a, b in mapIdBone.items()])
+        
+        lVGIdx = [GetBoneVertexGroupIdx(oMesh, x) for x in lBone]
+        mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
+        
+        return BId(oMesh, lBone, mapBoneId, mapIdBone, lVGIdx, mapVGIdxBoneId)
+    
+def GetWeights(bid):
+    llIF = [[] for x in range(len(bid.lBone))]
+    
+    dMesh = bid.oMesh.data
+    
+    for vI, v in enumerate(dMesh.vertices):
+        assert v.index == vI # Very surprising if not. Expecting the vertices array to be stored in sequential index order
+        for g in v.groups:
+            inflBoneId = bid.mapVGIdxBoneId[g.group]
+            assert inflBoneId is not None
+            llIF[inflBoneId].append([v.index, g.weight])
+
+    return llIF
+    
 def ArmaMesh(oMesh):
-    assert GetMeshArmature(oMesh)
+    assert GetMeshArmature(oMesh) is not None
     oArm = GetMeshArmature(oMesh)
     dArm = oArm.data
     lBone = [x for x in dArm.bones]
     
-    assert IsBoneHierarchySingleRoot(lBone)
-    print('B', [x.name for x in oMesh.vertex_groups])
+    bid = BId.MakeBoneId(oMesh, lBone)
+    
+    wts = GetWeights(bid)
+    
+    #assert IsBoneHierarchySingleRoot(lBone)
 
 def BlendRun():
-    print('hello')
-        
     oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
     oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
-    print('O', oArmaturedMesh)
     
     ArmaMesh(oArmaturedMesh[0])
     
