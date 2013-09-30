@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+try:
+    import bpy
+except ImportError:
+    pass
+
 from struct import pack as sPack, unpack as sUnpack, error as sError
 
 class P:
@@ -113,14 +118,61 @@ def run():
 
     return p
 
-if __name__ == '__main__':
-    p = run()
+def GetMeshArmature(oMesh):
+    for m in oMesh.modifiers:
+        if m.type == 'ARMATURE':
+            assert m.object.type == 'ARMATURE'
+            return m.object
+    return None
 
-    import sys
-    if len(sys.argv) == 1:
-        print("### NOT OUTPUTTING TO FILE ###")
-    if len(sys.argv) == 2:
-        fname = str(sys.argv[1])
-        assert fname.endswith('.dat')
-        with open(fname, 'wb') as f:
-            f.write(p.getBytes())
+def RecursiveParentRoot(rp):
+    if not len(rp): return None
+    return rp[-1]
+
+def IsBoneHierarchySingleRoot(lBone):
+    if not len(lBone): return True
+    par = RecursiveParentRoot(lBone[0].parent_recursive)
+    for b in lBone:
+        if RecursiveParentRoot(b.parent_recursive) != par:
+            return False
+    return True
+
+def ArmaMesh(oMesh):
+    assert GetMeshArmature(oMesh)
+    oArm = GetMeshArmature(oMesh)
+    dArm = oArm.data
+    lBone = [x for x in dArm.bones]
+    
+    assert IsBoneHierarchySingleRoot(lBone)
+    print('B', [x.name for x in oMesh.vertex_groups])
+
+def BlendRun():
+    print('hello')
+        
+    oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
+    oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
+    print('O', oArmaturedMesh)
+    
+    ArmaMesh(oArmaturedMesh[0])
+    
+    
+if __name__ == '__main__':
+    try:
+        import bpy
+        inBlend = True
+    except ImportError:
+        inBlend = False
+
+    if inBlend:
+        BlendRun()
+    else:
+        p = run()
+
+        import sys
+        if len(sys.argv) == 1:
+            print("### NOT OUTPUTTING TO FILE ###")
+        if len(sys.argv) == 2:
+            fname = str(sys.argv[1])
+            assert fname.endswith('.dat')
+            with open(fname, 'wb') as f:
+                f.write(p.getBytes())
