@@ -13,14 +13,15 @@
 
 #include <exception>
 
+/* warning C4018: signed/unsigned mismatch; warning C4996: fopen deprecated */
+#pragma warning(disable : 4018 4996)
+
 using namespace std;
 
 #define BU_MAX_INFLUENCING_BONE 4
 
-// P : Slice
-// Section : Name Slice
-
-class ExcItemExist : public exception {};
+class ExcItemExist  : public exception {};
+class ExcRecurseMax : public exception {};
 
 class slice_str_t {};
 class slice_reslice_abs_t {};
@@ -182,6 +183,7 @@ public:
 	vector<DMat> boneMatrix;
 
 	vector<string> meshName;
+	vector<int>    meshBoneCount;
 	vector<vector<float> > meshVert;
 
 	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
@@ -191,6 +193,8 @@ class SectionDataEx : public SectionData {
 public:
 	vector<vector<int> > nodeChild;
 	vector<vector<int> > boneChild;
+
+	vector<vector<int> > meshBone;
 
 	/* [Mesh0: [Vert0: id*BU_MAX_INFLUENCING_BONE ...] ...] */
 	vector<vector<int> >   meshVertId;
@@ -231,12 +235,25 @@ public:
 
 		SectionDataEx sd;
 		FillSectionData(sec, &sd);
+		CheckSectionData(sd);
 		FillSectionDataExtra(&sd);
 	}
 
 	static void FillSectionDataExtra(SectionDataEx *outSD) {
 		FillChild(outSD->nodeParent, &outSD->nodeChild);
 		FillChild(outSD->boneParent, &outSD->boneChild);
+
+		{
+			vector<vector<int> > meshBone(outSD->meshBoneCount.size());
+			for (int i = 0; i < outSD->meshBoneCount.size(); i++)
+				meshBone[i] = vector<int>(outSD->meshBoneCount[i]);
+
+			int bCnt = 0;
+			for (int i = 0; i < outSD->meshBoneCount.size(); i++)
+				for (int j = 0; j < i; j++)
+					meshBone[i].push_back(bCnt++);
+			outSD->meshBone = meshBone;
+		}
 
 		FillMeshVertInfluence(outSD->meshVert, outSD->meshBoneWeight, &outSD->meshVertId, &outSD->meshVertWt);
 	}
@@ -320,7 +337,7 @@ public:
 
 	static vector<pair<int, float> > mInfluGather(const vector<vector<pair<int, float> > > &boneWeight, int state, const vector<int> &curVisited) {
 		/* Remember: In the returned pair<int, float>, int is bone number.
-		 * In boneWeight, int is vertex id instead. */
+		* In boneWeight, int is vertex id instead. */
 
 		vector<int> boneCandidate;
 
@@ -347,6 +364,83 @@ public:
 		return finals;
 	}
 
+	static void CheckSectionData(const SectionData &sd) {
+		int numNode = sd.nodeName.size();
+		int numMesh = sd.meshName.size();
+		int numBone = sd.boneName.size();
+
+		/* No nodes in the model? */
+		assert(numNode);
+		assert(numNode == sd.nodeParent.size());
+		/* Empty names? */
+		for (auto &i : sd.nodeName)
+			assert(i.size());
+		for (auto &i : sd.nodeParent)
+			assert(i == -1 || (i >= 0 && i < numNode));
+		assert(!IsCycle(sd.nodeParent));
+		assert(numNode == sd.nodeMatrix.size());
+
+		assert(numNode == sd.nodeMesh.size());
+		for (auto &i : sd.nodeMesh)
+			assert(i == -1 || (i >= 0 && i < numMesh));
+		{
+			/* Check against duplicate mesh assignments. A particular Mesh should be assigned to only one node. */
+			vector<int> tmpNodeMesh = sd.nodeMesh;
+			auto it = remove(tmpNodeMesh.begin(), tmpNodeMesh.end(), -1);
+			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it));
+			int sansNegative = tmpNodeMesh.size(); /* -1 elements are not Mesh assignment. Do not count them. */
+			auto it2 = unique(tmpNodeMesh.begin(), tmpNodeMesh.end());
+			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it2));
+			int sansDuplicate = tmpNodeMesh.size(); /* Maintaining size after duplicate removal means no multiple assignment occured. */
+			assert(sansNegative == sansDuplicate);
+		}
+
+		assert(numBone);
+		assert(numBone == sd.boneParent.size());
+		for (auto &i : sd.boneName)
+			assert(i.size());
+		for (auto &i : sd.boneParent)
+			assert(i == -1 || (i >= 0 && i < numBone));
+		assert(!IsCycle(sd.boneParent));
+		assert(numBone == sd.boneMatrix.size());
+
+		assert(numMesh);
+		assert(numMesh == sd.meshBoneCount.size());
+		assert(numMesh == sd.meshVert.size());
+	}
+
+	static bool IsCycle(const vector<int> &parent) {
+		vector<int> root = mListRootFromParent(parent);
+		vector<vector<int> > child;
+		FillChild(parent, &child);
+
+		/* Worst case of a 'n' element hierarchy is a 'n' element chain. Therefore if depth reaches 'n+1' there has to be a cycle. */
+		try {
+			for (int i = 0; i < root.size(); i++)
+				mCycleDfs(parent, child, parent.size() + 1, 0, root[i]);
+		} catch(ExcRecurseMax &) {
+			return true;
+		}
+
+		return false;
+	}
+
+	static vector<int> mListRootFromParent(const vector<int> &parent) {
+		/* Find roots (-1 parent) */
+		vector<int> root;
+		for (int i = 0; i < parent.size(); i++)
+			if (parent[i] == -1)
+				root.push_back(i);
+		return root;
+	}
+
+	static void mCycleDfs(const vector<int> &parent, const vector<vector<int> > &child, const int maxDepth, int depth, int visiting) {
+		if (depth >= maxDepth)
+			throw ExcRecurseMax();
+		for (int i = 0; i < child[visiting].size(); i++)
+			mCycleDfs(parent, child, maxDepth, depth + 1, child[visiting][i]);
+	}
+
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
 		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
 		FillInt(SectionGetByName(sec, "NODEPARENT").data, &outSD->nodeParent);
@@ -359,6 +453,8 @@ public:
 		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
 
 		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
+
+		FillInt(SectionGetByName(sec, "MESHBONECOUNT").data, &outSD->meshBoneCount);
 
 		{
 			vector<string>         mVertChunks;

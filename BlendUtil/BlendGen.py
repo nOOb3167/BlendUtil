@@ -111,6 +111,8 @@ def run():
                 [(0, 1.0), (2, 1.0)]
             ]
         ])
+        
+    mkIntSec(p, b"MESHBONECOUNT", [1])
 
     mkSect(p, b"HELLO", b"datadata")
 
