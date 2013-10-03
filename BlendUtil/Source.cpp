@@ -237,6 +237,7 @@ public:
 		FillSectionData(sec, &sd);
 		CheckSectionData(sd);
 		FillSectionDataExtra(&sd);
+		CheckSectionDataEx(sd);
 	}
 
 	static void FillSectionDataExtra(SectionDataEx *outSD) {
@@ -407,6 +408,10 @@ public:
 		assert(numMesh);
 		assert(numMesh == sd.meshBoneCount.size());
 		assert(numMesh == sd.meshVert.size());
+	}
+
+	static void CheckSectionDataEx(const SectionDataEx &sd) {
+
 	}
 
 	static bool IsCycle(const vector<int> &parent) {

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# Bones in blender are y-forward (From head to tail as in 3D display window)
+
+def dbg():
+    import pdb; pdb.set_trace()
+
 try:
     import bpy
 except ImportError:
@@ -207,7 +212,14 @@ def GetIndices(bid):
             lIdx.extend([f.vertices[2], f.vertices[3], f.vertices[0]])
             
     return lIdx
-    
+
+class AMesh:
+    def __init__(self, bid, wts, vts, ics):
+        self.bid = bid
+        self.wts = wts
+        self.vts = vts
+        self.ics = ics
+
 def ArmaMesh(oMesh):
     assert GetMeshArmature(oMesh) is not None
     oArm = GetMeshArmature(oMesh)
@@ -221,12 +233,40 @@ def ArmaMesh(oMesh):
     ics = GetIndices(bid)
     
     #assert IsBoneHierarchySingleRoot(lBone)
+    
+    return AMesh(bid, wts, vts, ics)
+
+def BlendMatToList(mat):
+    l = [float(e) for vec in mat for e in vec]
+    l = [(0.0 if abs(e) <= 0.0001 else e) for e in l]
+    return l
+
+def pm(m):
+    for i in range(4):
+        print(m[4*i+0], m[4*i+1], m[4*i+2], m[4*i+3])
 
 def BlendRun():
     oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
     oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
     
-    ArmaMesh(oArmaturedMesh[0])
+    am = [ArmaMesh(m) for m in oArmaturedMesh]
+    
+    p = P()
+    
+    nodeName = [m.bid.oMesh.name for m in am]
+    nodeParent = None
+    nodeMatrix = [m.bid.oMesh.matrix_local for m in am]
+    
+    nodeMesh = list(range(len(am))) # Every node is a mesh node (Traversing only ArmaMesh of oArmaturedMesh)
+    
+    boneName = [[i.name for i in m.bid.lBone] for m in am]
+    boneParent = None
+    boneMatrix = [BlendMatToList(i.matrix_local) for m in am for i in m.bid.lBone]
+    
+    meshBoneCount = [len(m.bid.lBone) for m in am]
+    
+    
+    
     
     
 if __name__ == '__main__':
