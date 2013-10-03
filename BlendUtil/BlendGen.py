@@ -116,7 +116,9 @@ def run():
                 [(0, 1.0), (2, 1.0)]
             ]
         ])
-        
+    
+    mkMatrixSec(p, b"MESHROOTMATRIX", [mIdentity])
+    
     mkIntSec(p, b"MESHBONECOUNT", [1])
 
     mkSect(p, b"HELLO", b"datadata")
@@ -161,13 +163,38 @@ class BId:
 
     @classmethod
     def MakeBoneId(klass, oMesh, lBone):
-        mapIdBone = dict(enumerate(lBone))
-        mapBoneId = dict([(b, a) for a, b in mapIdBone.items()])
+        """ Not super useful. Bone IDs gotten thus are local to mesh instead of global """
+        mapIdBone, mapBoneId = BId.BoneGetMapId(lBone)
         
         lVGIdx = [GetBoneVertexGroupIdx(oMesh, x) for x in lBone]
         mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
         
         return BId(oMesh, lBone, mapBoneId, mapIdBone, lVGIdx, mapVGIdxBoneId)
+
+    @classmethod
+    def BoneGetMapId(klass, lBone):
+        mapIdBone = dict(enumerate(lBone))
+        mapBoneId = dict([(b, a) for a, b in mapIdBone.items()])
+        
+        return [mapIdBone, mapBoneId]
+    
+    @classmethod
+    def BidGetIdParent(klass, lBid):
+        lBone = [b for bid in lBid for b in bid.lBone]
+        mapIdBone, mapBoneId = BId.BoneGetMapId(lBone)
+        
+        lIdParent = []
+        
+        for b in lBone:
+            assert b in mapBoneId
+            assert b.parent == None or b.parent in mapBoneId
+            if b.parent == None:
+                lIdParent.append(-1)
+            else:
+                lIdParent.append(mapBoneId[b.parent])
+            
+        return lIdParent
+        
     
 def GetWeights(bid):
     llIF = [[] for x in range(len(bid.lBone))]
@@ -254,21 +281,27 @@ def BlendRun():
     p = P()
     
     nodeName = [m.bid.oMesh.name for m in am]
-    nodeParent = None
-    nodeMatrix = [m.bid.oMesh.matrix_local for m in am]
     
-    nodeMesh = list(range(len(am))) # Every node is a mesh node (Traversing only ArmaMesh of oArmaturedMesh)
+    #FIXME: What should be:
+    #       Export through all nodes, not just Armatured.
+    #nodeParent = FIXME
+    #nodeMatrix = [m.bid.oMesh.matrix_local for m in am]
     
-    boneName = [[i.name for i in m.bid.lBone] for m in am]
-    boneParent = None
-    boneMatrix = [BlendMatToList(i.matrix_local) for m in am for i in m.bid.lBone]
+    #FIXME: Instead:
+    #       Export no hierarchy. World matrices and null parents.
+    nodeParent = [-1 for m in am]
+    nodeMatrix = [m.bid.oMesh.matrix_world for m in am]
     
+    #FIXME: Every node is a mesh node (Traversing only ArmaMesh of oArmaturedMesh)
+    nodeMesh = list(range(len(am)))
+    
+    boneName = [i.name for m in am for i in m.bid.lBone]
+    boneParent = BId.BidGetIdParent([m.bid for m in am])
+    boneMatrix = [i.matrix_local for m in am for i in m.bid.lBone]
+    
+    meshRootMatrix = [GetMeshArmature(m.bid.oMesh).matrix_world for m in am]
     meshBoneCount = [len(m.bid.lBone) for m in am]
-    
-    
-    
-    
-    
+
 if __name__ == '__main__':
     try:
         import bpy
