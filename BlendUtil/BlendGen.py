@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# Notepad++ Truncates Run Commands
+# cmd /K ""C:\Users\Andrej\testM\Blender\blender-2.67b-windows32\blender.exe" -b "C:\Users\Andrej\Documents\Visual Studio 2012\Projects\BlendUtil\blendOneBone.blend" -P "$(FULL_CURRENT_PATH)" -- "tmpdata.dat" "
+
 # Bones in blender are y-forward (From head to tail as in 3D display window)
 
 def dbg():
@@ -56,14 +59,20 @@ def mkIntSec(p, bSecName, lInt):
         mkInt32(pW, n)
     mkSect(p, bSecName, pW.getBytes())
 
-def mkListFloatSec(p, bSecName, llFloat):
+def mkListGenSec(p, bSecName, subSerializer, llSub):
     pW = P()
-    for m in llFloat:
+    for m in llSub:
         pX = P()
         for n in m:
-            mkFloat(pX, n)
+            subSerializer(pX, n)
         mkLendel(pW, pX.getBytes())
     mkSect(p, bSecName, pW.getBytes())
+
+def mkListFloatSec(p, bSecName, llFloat):
+    return mkListGenSec(p, bSecName, mkFloat, llFloat)
+
+def mkListIntSec(p, bSecName, llInt):
+    return mkListGenSec(p, bSecName, mkInt32, llInt)
 
 def mkListListPairIntFloatSec(p, bSecName, llpIF):
     pW = P()
@@ -107,8 +116,13 @@ def run():
     mkLenDelSec(p, b"MESHNAME", [b'Mesh0'])
     mkListFloatSec(p, b"MESHVERT",
         [[0.0, 0.0, 0.0,
-         1.0, 0.0, 0.0,
-         1.0, 1.0, 0.0,]])
+          1.0, 0.0, 0.0,
+          1.0, 1.0, 0.0,]])
+    
+    mkListIntSec(p, b"MESHINDEX",
+        [[0, 1, 2,
+          3, 4, 5,
+          6, 7, 8]])
     
     mkListListPairIntFloatSec(p, b"MESHBONEWEIGHT",
         [
@@ -217,7 +231,7 @@ def GetVerts(bid):
     
     for vI, v in enumerate(dMesh.vertices):
         assert v.index == vI
-        lVert.append([v.co[0], v.co[1], v.co[2]])
+        lVert.extend([v.co[0], v.co[1], v.co[2]])
     
     return lVert
 
@@ -272,13 +286,14 @@ def pm(m):
     for i in range(4):
         print(m[4*i+0], m[4*i+1], m[4*i+2], m[4*i+3])
 
+def BytesFromStr(s):
+    return bytes(s, encoding='UTF-8')
+        
 def BlendRun():
     oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
     oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
     
     am = [ArmaMesh(m) for m in oArmaturedMesh]
-    
-    p = P()
     
     nodeName = [m.bid.oMesh.name for m in am]
     
@@ -299,8 +314,35 @@ def BlendRun():
     boneParent = BId.BidGetIdParent([m.bid for m in am])
     boneMatrix = [i.matrix_local for m in am for i in m.bid.lBone]
     
+    #FIXME: Mesh name just using Node names
+    meshName = nodeName[:]
+    meshVert = [m.vts for m in am]
+    meshBoneWeight = [m.wts for m in am]
+    meshIndex = [m.ics for m in am]
+    
     meshRootMatrix = [GetMeshArmature(m.bid.oMesh).matrix_world for m in am]
     meshBoneCount = [len(m.bid.lBone) for m in am]
+
+    p = P()
+    
+    mkLenDelSec(p, b"NODENAME", [BytesFromStr(i) for i in nodeName])
+    mkIntSec(p, b"NODEPARENT", nodeParent)
+    mkMatrixSec(p, b"NODEMATRIX", [BlendMatToList(m) for m in nodeMatrix])
+    
+    mkIntSec(p, b"NODEMESH", nodeMesh)
+    
+    mkLenDelSec(p, b"BONENAME", [BytesFromStr(i) for i in boneName])
+    mkIntSec(p, b"BONEPARENT", boneParent)
+    mkMatrixSec(p, b"BONEMATRIX", [BlendMatToList(m) for m in boneMatrix])
+    
+    mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
+    mkListIntSec(p, b"MESHINDEX", meshIndex)
+    mkListListPairIntFloatSec(p, b"MESHBONEWEIGHT", meshBoneWeight)
+    
+    mkMatrixSec(p, b"MESHROOTMATRIX", [BlendMatToList(m) for m in meshRootMatrix])
+    mkIntSec(p, b"MESHBONECOUNT", meshBoneCount)
+    
+    return p
 
 if __name__ == '__main__':
     try:
@@ -309,12 +351,25 @@ if __name__ == '__main__':
     except ImportError:
         inBlend = False
 
+    import sys
+    import os
+
     if inBlend:
-        BlendRun()
+        p = BlendRun()
+        
+        # Paranoia length check
+        assert len(sys.argv) == 7
+        blendPath = str(sys.argv[2])
+        outName   = str(sys.argv[6])
+        assert blendPath.endswith(".blend") and os.path.exists(blendPath)
+        assert outName.endswith('.dat')
+        outPathFull = os.path.dirname(blendPath) + outName
+        
+        with open(outPathFull, 'wb') as f:
+            f.write(p.getBytes())
     else:
         p = run()
 
-        import sys
         if len(sys.argv) == 1:
             print("### NOT OUTPUTTING TO FILE ###")
         if len(sys.argv) == 2:
