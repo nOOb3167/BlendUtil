@@ -310,18 +310,18 @@ def BlendRun():
     #FIXME: Every node is a mesh node (Traversing only ArmaMesh of oArmaturedMesh)
     nodeMesh = list(range(len(am)))
     
-    boneName = [i.name for m in am for i in m.bid.lBone]
+    boneName   = [i.name for m in am for i in m.bid.lBone]
     boneParent = BId.BidGetIdParent([m.bid for m in am])
     boneMatrix = [i.matrix_local for m in am for i in m.bid.lBone]
     
     #FIXME: Mesh name just using Node names
-    meshName = nodeName[:]
-    meshVert = [m.vts for m in am]
-    meshBoneWeight = [m.wts for m in am]
-    meshIndex = [m.ics for m in am]
-    
+    meshName       = nodeName[:]
+    meshBoneCount  = [len(m.bid.lBone) for m in am]
+    meshVert       = [m.vts for m in am]
+    meshIndex      = [m.ics for m in am]
     meshRootMatrix = [GetMeshArmature(m.bid.oMesh).matrix_world for m in am]
-    meshBoneCount = [len(m.bid.lBone) for m in am]
+    
+    meshBoneWeight = [m.wts for m in am]
 
     p = P()
     
@@ -336,11 +336,12 @@ def BlendRun():
     mkMatrixSec(p, b"BONEMATRIX", [BlendMatToList(m) for m in boneMatrix])
     
     mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
-    mkListIntSec(p, b"MESHINDEX", meshIndex)
-    mkListListPairIntFloatSec(p, b"MESHBONEWEIGHT", meshBoneWeight)
-    
-    mkMatrixSec(p, b"MESHROOTMATRIX", [BlendMatToList(m) for m in meshRootMatrix])
     mkIntSec(p, b"MESHBONECOUNT", meshBoneCount)
+    mkListFloatSec(p, b"MESHVERT", meshVert)
+    mkListIntSec(p, b"MESHINDEX", meshIndex)
+    mkMatrixSec(p, b"MESHROOTMATRIX", [BlendMatToList(m) for m in meshRootMatrix])
+    
+    mkListListPairIntFloatSec(p, b"MESHBONEWEIGHT", meshBoneWeight)
     
     return p
 
@@ -363,7 +364,7 @@ if __name__ == '__main__':
         outName   = str(sys.argv[6])
         assert blendPath.endswith(".blend") and os.path.exists(blendPath)
         assert outName.endswith('.dat')
-        outPathFull = os.path.dirname(blendPath) + outName
+        outPathFull = os.path.join(os.path.dirname(blendPath), outName)
         
         with open(outPathFull, 'wb') as f:
             f.write(p.getBytes())

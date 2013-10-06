@@ -174,17 +174,19 @@ class SectionData {
 public:
 	vector<string> nodeName;
 	vector<int>    nodeParent;
-	vector<DMat> nodeMatrix;
+	vector<DMat>   nodeMatrix;
 
 	vector<int> nodeMesh;
 
 	vector<string> boneName;
 	vector<int>    boneParent;
-	vector<DMat> boneMatrix;
+	vector<DMat>   boneMatrix;
 
 	vector<string> meshName;
 	vector<int>    meshBoneCount;
 	vector<vector<float> > meshVert;
+	vector<vector<int> >   meshIndex;
+	vector<DMat>           meshRootMatrix;
 
 	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
 };
@@ -240,6 +242,73 @@ public:
 		CheckSectionDataEx(sd);
 	}
 
+	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
+		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
+		FillInt(SectionGetByName(sec, "NODEPARENT").data, &outSD->nodeParent);
+		FillMat(SectionGetByName(sec, "NODEMATRIX").data, &outSD->nodeMatrix);
+
+		FillInt(SectionGetByName(sec, "NODEMESH").data, &outSD->nodeMesh);
+
+		FillLenDel(SectionGetByName(sec, "BONENAME").data, &outSD->boneName);
+		FillInt(SectionGetByName(sec, "BONEPARENT").data, &outSD->boneParent);
+		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
+
+		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
+		FillInt(SectionGetByName(sec, "MESHBONECOUNT").data, &outSD->meshBoneCount);
+
+		{
+			vector<string>         mVertChunks;
+			vector<vector<float> > mVert;
+			FillLenDel(SectionGetByName(sec, "MESHVERT").data, &mVertChunks);
+			for (int i = 0; i < mVertChunks.size(); i++) {
+				vector<float> v;
+				FillFloat(Slice(slice_str_t(), mVertChunks[i]), &v);
+				assert(v.size() % 3 == 0);
+				mVert.push_back(v);
+			}
+			outSD->meshVert = mVert;
+		}
+
+		{
+			vector<string>       mIndexChunks;
+			vector<vector<int> > mIndex;
+			FillLenDel(SectionGetByName(sec, "MESHINDEX").data, &mIndexChunks);
+			for (int i = 0; i < mIndexChunks.size(); i++) {
+				vector<int> v;
+				FillInt(Slice(slice_str_t(), mIndexChunks[i]), &v);
+				assert(v.size() % 3 == 0);
+				mIndex.push_back(v);
+			}
+			outSD->meshIndex = mIndex;
+		}
+
+		FillMat(SectionGetByName(sec, "MESHROOTMATRIX").data, &outSD->meshRootMatrix);
+
+		{
+			int numMesh = outSD->meshName.size();
+			int numBone = outSD->boneName.size();
+
+			vector<string> mBWChunks;
+			vector<vector<vector<pair<int, float> > > > mBWeight;
+
+			FillLenDel(SectionGetByName(sec, "MESHBONEWEIGHT").data, &mBWChunks);
+			assert(mBWChunks.size() == outSD->meshName.size() * outSD->boneName.size());
+
+			mBWeight = vector<vector<vector<pair<int, float> > > >(numMesh);
+			for (auto &i : mBWeight)
+				i = vector<vector<pair<int, float> > >(numBone);
+
+			for (int m = 0; m < numMesh; m++)
+				for (int b = 0; b < numBone; b++) {
+					vector<pair<int, float> > v;
+					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[(numMesh * m) + b]), &v);
+					mBWeight[m][b] = v;
+				}
+
+				outSD->meshBoneWeight = mBWeight;
+		}
+	}
+
 	static void FillSectionDataExtra(SectionDataEx *outSD) {
 		FillChild(outSD->nodeParent, &outSD->nodeChild);
 		FillChild(outSD->boneParent, &outSD->boneChild);
@@ -257,6 +326,55 @@ public:
 		}
 
 		FillMeshVertInfluence(outSD->meshVert, outSD->meshBoneWeight, &outSD->meshVertId, &outSD->meshVertWt);
+	}
+
+	static void CheckSectionData(const SectionData &sd) {
+		int numNode = sd.nodeName.size();
+		int numMesh = sd.meshName.size();
+		int numBone = sd.boneName.size();
+
+		/* No nodes in the model? */
+		assert(numNode);
+		assert(numNode == sd.nodeParent.size());
+		/* Empty names? */
+		for (auto &i : sd.nodeName)
+			assert(i.size());
+		for (auto &i : sd.nodeParent)
+			assert(i == -1 || (i >= 0 && i < numNode));
+		assert(!IsCycle(sd.nodeParent));
+		assert(numNode == sd.nodeMatrix.size());
+
+		assert(numNode == sd.nodeMesh.size());
+		for (auto &i : sd.nodeMesh)
+			assert(i == -1 || (i >= 0 && i < numMesh));
+		{
+			/* Check against duplicate mesh assignments. A particular Mesh should be assigned to only one node. */
+			vector<int> tmpNodeMesh = sd.nodeMesh;
+			auto it = remove(tmpNodeMesh.begin(), tmpNodeMesh.end(), -1);
+			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it));
+			int sansNegative = tmpNodeMesh.size(); /* -1 elements are not Mesh assignment. Do not count them. */
+			auto it2 = unique(tmpNodeMesh.begin(), tmpNodeMesh.end());
+			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it2));
+			int sansDuplicate = tmpNodeMesh.size(); /* Maintaining size after duplicate removal means no multiple assignment occured. */
+			assert(sansNegative == sansDuplicate);
+		}
+
+		assert(numBone);
+		assert(numBone == sd.boneParent.size());
+		for (auto &i : sd.boneName)
+			assert(i.size());
+		for (auto &i : sd.boneParent)
+			assert(i == -1 || (i >= 0 && i < numBone));
+		assert(!IsCycle(sd.boneParent));
+		assert(numBone == sd.boneMatrix.size());
+
+		assert(numMesh);
+		assert(numMesh == sd.meshBoneCount.size());
+		assert(numMesh == sd.meshVert.size());
+	}
+
+	static void CheckSectionDataEx(const SectionDataEx &sd) {
+
 	}
 
 	static void FillChild(const vector<int> &inParent, vector<vector<int> > *outSD) {
@@ -329,7 +447,7 @@ public:
 		for (int i = 0; i < boneWeight.size(); i++) {
 			int &curVisited   = (*ioCurVisited)[i];
 			int  nextVisited  = curVisited + 1;
-			int  finalVisited = boneWeight[i].size();
+			int  finalVisited = boneWeight[i].size() - 1;
 
 			if (curVisited < finalVisited && boneWeight[i][nextVisited].first == state)
 				curVisited += 1;
@@ -365,55 +483,6 @@ public:
 		return finals;
 	}
 
-	static void CheckSectionData(const SectionData &sd) {
-		int numNode = sd.nodeName.size();
-		int numMesh = sd.meshName.size();
-		int numBone = sd.boneName.size();
-
-		/* No nodes in the model? */
-		assert(numNode);
-		assert(numNode == sd.nodeParent.size());
-		/* Empty names? */
-		for (auto &i : sd.nodeName)
-			assert(i.size());
-		for (auto &i : sd.nodeParent)
-			assert(i == -1 || (i >= 0 && i < numNode));
-		assert(!IsCycle(sd.nodeParent));
-		assert(numNode == sd.nodeMatrix.size());
-
-		assert(numNode == sd.nodeMesh.size());
-		for (auto &i : sd.nodeMesh)
-			assert(i == -1 || (i >= 0 && i < numMesh));
-		{
-			/* Check against duplicate mesh assignments. A particular Mesh should be assigned to only one node. */
-			vector<int> tmpNodeMesh = sd.nodeMesh;
-			auto it = remove(tmpNodeMesh.begin(), tmpNodeMesh.end(), -1);
-			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it));
-			int sansNegative = tmpNodeMesh.size(); /* -1 elements are not Mesh assignment. Do not count them. */
-			auto it2 = unique(tmpNodeMesh.begin(), tmpNodeMesh.end());
-			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it2));
-			int sansDuplicate = tmpNodeMesh.size(); /* Maintaining size after duplicate removal means no multiple assignment occured. */
-			assert(sansNegative == sansDuplicate);
-		}
-
-		assert(numBone);
-		assert(numBone == sd.boneParent.size());
-		for (auto &i : sd.boneName)
-			assert(i.size());
-		for (auto &i : sd.boneParent)
-			assert(i == -1 || (i >= 0 && i < numBone));
-		assert(!IsCycle(sd.boneParent));
-		assert(numBone == sd.boneMatrix.size());
-
-		assert(numMesh);
-		assert(numMesh == sd.meshBoneCount.size());
-		assert(numMesh == sd.meshVert.size());
-	}
-
-	static void CheckSectionDataEx(const SectionDataEx &sd) {
-
-	}
-
 	static bool IsCycle(const vector<int> &parent) {
 		vector<int> root = mListRootFromParent(parent);
 		vector<vector<int> > child;
@@ -444,59 +513,6 @@ public:
 			throw ExcRecurseMax();
 		for (int i = 0; i < child[visiting].size(); i++)
 			mCycleDfs(parent, child, maxDepth, depth + 1, child[visiting][i]);
-	}
-
-	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
-		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
-		FillInt(SectionGetByName(sec, "NODEPARENT").data, &outSD->nodeParent);
-		FillMat(SectionGetByName(sec, "NODEMATRIX").data, &outSD->nodeMatrix);
-
-		FillInt(SectionGetByName(sec, "NODEMESH").data, &outSD->nodeMesh);
-
-		FillLenDel(SectionGetByName(sec, "BONENAME").data, &outSD->boneName);
-		FillInt(SectionGetByName(sec, "BONEPARENT").data, &outSD->boneParent);
-		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
-
-		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
-
-		FillInt(SectionGetByName(sec, "MESHBONECOUNT").data, &outSD->meshBoneCount);
-
-		{
-			vector<string>         mVertChunks;
-			vector<vector<float> > mVert;
-			FillLenDel(SectionGetByName(sec, "MESHVERT").data, &mVertChunks);
-			for (int i = 0; i < mVertChunks.size(); i++) {
-				vector<float> v;
-				FillFloat(Slice(slice_str_t(), mVertChunks[i]), &v);
-				assert(v.size() % 3 == 0 && v.size() % 9 == 0);
-				mVert.push_back(v);
-			}
-			outSD->meshVert = mVert;
-		}
-
-		{
-			int numMesh = outSD->meshName.size();
-			int numBone = outSD->boneName.size();
-
-			vector<string> mBWChunks;
-			vector<vector<vector<pair<int, float> > > > mBWeight;
-
-			FillLenDel(SectionGetByName(sec, "MESHBONEWEIGHT").data, &mBWChunks);
-			assert(mBWChunks.size() == outSD->meshName.size() * outSD->boneName.size());
-
-			mBWeight = vector<vector<vector<pair<int, float> > > >(numMesh);
-			for (auto &i : mBWeight)
-				i = vector<vector<pair<int, float> > >(numBone);
-
-			for (int m = 0; m < numMesh; m++)
-				for (int b = 0; b < numBone; b++) {
-					vector<pair<int, float> > v;
-					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[(numMesh * m) + b]), &v);
-					mBWeight[m][b] = v;
-				}
-
-				outSD->meshBoneWeight = mBWeight;
-		}
 	}
 
 	static void FillInt(const Slice &sec, vector<int> *outVS) {
