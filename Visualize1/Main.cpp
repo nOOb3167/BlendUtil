@@ -170,6 +170,35 @@ namespace Md {
 
 	class ShdTexSimple : public Shd {
 	public:
+
+		class MdD {
+		public:
+			size_t triCnt;
+
+			shared_ptr<Buffer> id;
+			shared_ptr<Buffer> vt;
+
+			MdD(const SectionDataEx &sde, int meshId) :
+				triCnt(sde.meshIndex[meshId].size() / 3),
+				id(new Buffer()),
+				vt(new Buffer())
+			{
+				assert(sde.meshIndex[meshId].size() % 3 == 0);
+
+				{
+					id->Bind(oglplus::BufferOps::Target::Array);
+					vector<GLuint> v; transform(sde.meshIndex[meshId].begin(), sde.meshIndex[meshId].end(), back_inserter(v), [](int i) { return i; });
+					Buffer::Data(oglplus::BufferOps::Target::Array, v);
+				}
+
+				{
+					vt->Bind(oglplus::BufferOps::Target::Array);
+					vector<GLfloat> v; transform(sde.meshVert[meshId].begin(), sde.meshVert[meshId].end(), back_inserter(v), [](float i) { return i; });
+					Buffer::Data(oglplus::BufferOps::Target::Array, v);
+				}
+			}
+		};
+
 		shared_ptr<Program> prog;
 		shared_ptr<VertexArray> va;
 
@@ -180,15 +209,15 @@ namespace Md {
 			va(new VertexArray()),
 			triCnt(0) {}
 
-		void Prime(const MdT &mt) {
-			//triCnt = md.triCnt;
+		void Prime(const MdT &mt, const MdD &md) {
+			triCnt = md.triCnt;
 
 			va->Bind();
 
-			//md.id->Bind(oglplus::BufferOps::Target::ElementArray);
+			md.id->Bind(oglplus::BufferOps::Target::ElementArray);
 
-			//md.vt->Bind(oglplus::BufferOps::Target::Array);
-			//(*prog|"Position").Setup(3, oglplus::DataType::Float).Enable();
+			md.vt->Bind(oglplus::BufferOps::Target::Array);
+			(*prog|"Position").Setup(3, oglplus::DataType::Float).Enable();
 
 			/* MdT */
 
@@ -219,9 +248,14 @@ namespace Md {
 
 	struct Ex1 : public ExBase {
 		Md::ShdTexSimple shd;
+		shared_ptr<SectionDataEx> sde;
 		shared_ptr<Md::MdT> mdt;
+		shared_ptr<Md::ShdTexSimple::MdD> mdd;
 
-		Ex1() {}
+		Ex1() {
+			sde = shared_ptr<SectionDataEx>(BlendUtilMakeSectionDataEx("../tmpdata.dat"));
+			mdd = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0));
+		}
 
 		void Display() {
 			ExBase::Display();
@@ -231,7 +265,7 @@ namespace Md {
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
 				ModelMatrixf()));
 
-			shd.Prime(*mdt);
+			shd.Prime(*mdt, *mdd);
 			shd.Draw();
 			shd.UnPrime();
 		}
