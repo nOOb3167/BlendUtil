@@ -232,14 +232,16 @@ public:
 		throw ExcItemExist();
 	}
 
-	static void ListSectionPostfix(const P &inP) {
+	static SectionDataEx * MakeSectionDataEx(const P &inP) {
 		vector<Section> sec = ReadSection(inP);
 
-		SectionDataEx sd;
-		FillSectionData(sec, &sd);
-		CheckSectionData(sd);
-		FillSectionDataExtra(&sd);
-		CheckSectionDataEx(sd);
+		SectionDataEx *sd = new SectionDataEx();
+		FillSectionData(sec, sd);
+		CheckSectionData(*sd);
+		FillSectionDataExtra(sd);
+		CheckSectionDataEx(*sd);
+
+		return sd;
 	}
 
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
@@ -632,11 +634,12 @@ P * MakePFromFile(const string &fname) {
 	return new P(acc);
 }
 
-int main(int argc, char **argv) {
+SectionDataEx * BlendUtilMakeSectionDataEx(const string &fName) {
+	shared_ptr<P> p(MakePFromFile(fName.c_str()));
+	SectionDataEx *sd = Parse::MakeSectionDataEx(*p);
+	return sd;
+}
 
-	shared_ptr<P> p(MakePFromFile("../tmpdata.dat"));
-
-	Parse::ListSectionPostfix(*p);
-
-	return EXIT_SUCCESS;
+void BlendUtilRun(void) {
+	SectionDataEx *sd = BlendUtilMakeSectionDataEx("../tmpdata.dat");
 }

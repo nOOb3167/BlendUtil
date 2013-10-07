@@ -18,6 +18,8 @@
 #include <GL/freeglut.h>
 #include <oglplus/all.hpp>
 
+#include <../BlendUtil/Source.cpp>
+
 #define G_WIN_W 800
 #define G_WIN_H 800
 
@@ -179,8 +181,6 @@ namespace Md {
 			triCnt(0) {}
 
 		void Prime(const MdT &mt) {
-			/* MdD */
-
 			//triCnt = md.triCnt;
 
 			va->Bind();
