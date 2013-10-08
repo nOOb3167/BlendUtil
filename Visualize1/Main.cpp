@@ -232,7 +232,7 @@ namespace Md {
 			assert(IsValid());
 
 			prog->Use();
-			Ctx::DrawArrays(PrimitiveType::Triangles, 0, triCnt * 3);
+			Ctx::DrawElements(PrimitiveType::Triangles, triCnt * 3, oglplus::DataType::UnsignedInt);
 			prog->UseNone();
 		}
 
