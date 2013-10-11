@@ -165,6 +165,36 @@ def GetBoneVertexGroupIdx(oMesh, bone):
         if g.name == bone.name:
             return g.index
     return None
+
+def ListGetMapId(l):
+    mapIdElt = dict(enumerate(l))
+    mapEltId = dict([(b, a) for a, b in mapIdElt.items()])
+    
+    return [mapIdElt, mapEltId]
+
+def ListGetIdParentBlenderSpecial(lObject): return ListGetIdParentBlenderSpecialCheck(lObject, lambda x: True)
+def ListGetIdParentBlenderSpecialCheck(lObject, fChecker):
+    """For Blender Objects (Used for Node, Bone)
+         Assuming x in lObject:
+         x.parent == None if no parent (Is a root)
+                  else is another member of lObject
+       Id is set to -1 in case of no parent"""
+    mapIdElt, mapEltId = ListGetMapId(lObject)
+    
+    lIdParent = []
+    
+    for o in lObject:
+        assert o in mapEltId
+        assert o.parent == None or o.parent in mapIdElt
+        
+        assert fChecker(o)
+        
+        if o.parent == None:
+            lIdParent.append(-1)
+        else:
+            lIdParent.append(mapEltId[o.parent])
+            
+    return lIdParent
     
 class BId:
     def __init__(self, oMesh, lBone, mapIdBone, mapBoneId, lVGIdx, mapVGIdxBoneId):
@@ -187,29 +217,13 @@ class BId:
 
     @classmethod
     def BoneGetMapId(klass, lBone):
-        mapIdBone = dict(enumerate(lBone))
-        mapBoneId = dict([(b, a) for a, b in mapIdBone.items()])
-        
-        return [mapIdBone, mapBoneId]
+        return ListGetMapId(lBone)
     
     @classmethod
     def BidGetIdParent(klass, lBid):
         lBone = [b for bid in lBid for b in bid.lBone]
-        mapIdBone, mapBoneId = BId.BoneGetMapId(lBone)
-        
-        lIdParent = []
-        
-        for b in lBone:
-            assert b in mapBoneId
-            assert b.parent == None or b.parent in mapBoneId
-            if b.parent == None:
-                lIdParent.append(-1)
-            else:
-                lIdParent.append(mapBoneId[b.parent])
-            
-        return lIdParent
-        
-    
+        return ListGetIdParentBlenderSpecialCheck(lBone, lambda x: True if x.parent == None or x.parent_type == 'BONE' else False)
+
 def GetWeights(bid):
     llIF = [[] for x in range(len(bid.lBone))]
     
@@ -224,10 +238,9 @@ def GetWeights(bid):
 
     return llIF
 
-def GetVerts(bid):
+def GetVerts(bid): return dMeshGetVerts(bid.oMesh.data)
+def dMeshGetVerts(dMesh):
     lVert = []
-
-    dMesh = bid.oMesh.data
     
     for vI, v in enumerate(dMesh.vertices):
         assert v.index == vI
@@ -235,10 +248,10 @@ def GetVerts(bid):
     
     return lVert
 
-def GetIndices(bid):
-    lIdx = []
     
-    dMesh = bid.oMesh.data
+def GetIndices(bid): return dMeshGetIndices(bid.oMesh.data)
+def dMeshGetIndices(dMesh):
+    lIdx = []
     
     # FIXME: Will be using tessfaces, force recalculation if dirty
     dMesh.update(calc_tessface=True)
@@ -253,6 +266,35 @@ def GetIndices(bid):
             lIdx.extend([f.vertices[2], f.vertices[3], f.vertices[0]])
             
     return lIdx
+
+class BaseMesh:
+    @classmethod
+    def NodeGetMapId(klass, lAllNode):
+        """lAllNode: Combined MMesh, AMesh"""
+        assert all([isinstance(x, MMesh) or isinstance(x, AMesh) for x in lAllNode])
+        return ListGetMapId(lAllNode)
+        
+    @classmethod
+    def NodeGetIdParent(klass, lAllNode):
+        loMesh = [x.bid.oMesh for x in lAllNode]
+        return ListGetIdParentBlenderSpecialCheck(loMesh, lambda x: True if x.parent == None or x.parent_type == 'OBJECT' else False)
+    
+class MMesh:
+    def __init__(self, bid, vts, ics):
+        self.bid = bid
+        self.vts = vts
+        self.ics = ics
+
+def MeshMesh(oMesh):
+    vts = dMeshGetVerts(oMesh.data)
+    ics = dMeshGetIndices(oMesh.data)
+
+    class DummyBid:
+        def __init__(self, oMesh):
+            self.oMesh = oMesh
+    bid = MMesh.DummyBid(oMesh)
+    
+    return MMesh(bid, vts, ics)
 
 class AMesh:
     def __init__(self, bid, wts, vts, ics):
@@ -286,29 +328,42 @@ def pm(m):
     for i in range(4):
         print(m[4*i+0], m[4*i+1], m[4*i+2], m[4*i+3])
 
+def lConcat(la, lb):
+    lc = la[:]; lc.extend(lb); return lc
+
 def BytesFromStr(s):
     return bytes(s, encoding='UTF-8')
         
 def BlendRun():
     oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
     oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
+    oMeshedMesh    = [x for x in oMesh if not GetMeshArmature(x)]
+    assert len(set(lConcat(oMeshedMesh, oArmaturedMesh))) == len(oMeshedMesh) + len(oArmaturedMesh)
     
     am = [ArmaMesh(m) for m in oArmaturedMesh]
+    mm = [MeshMesh(m) for m in oMeshedMesh]
     
-    nodeName = [m.bid.oMesh.name for m in am]
+    # Important: Concatenation order is AMesh, MMesh
+    #              Full Bone information for the AMesh part
+    #              No   Bone information for the MMesh part
+    #            Ameshes get the 0-len(len(am)) IDs.
+    #            Currently important at least in meshBoneCount etc.
+    allM = lConcat(am, mm)
     
-    #FIXME: What should be:
-    #       Export through all nodes, not just Armatured.
-    #nodeParent = FIXME
-    #nodeMatrix = [m.bid.oMesh.matrix_local for m in am]
-    
+    nodeName = [m.bid.oMesh.name for m in allM]
+    nodeParent = BaseMesh.NodeGetIdParent(allM)
+    nodeMatrix = [m.bid.oMesh.matrix_local for m in allM]
+        
     #FIXME: Instead:
     #       Export no hierarchy. World matrices and null parents.
-    nodeParent = [-1 for m in am]
-    nodeMatrix = [m.bid.oMesh.matrix_world for m in am]
+    #nodeName = [m.bid.oMesh.name for m in am]
+    #nodeParent = [-1 for m in am]
+    #nodeMatrix = [m.bid.oMesh.matrix_world for m in am]
     
-    #FIXME: Every node is a mesh node (Traversing only ArmaMesh of oArmaturedMesh)
-    nodeMesh = list(range(len(am)))
+    #FIXME: Every node is a mesh node.
+    #       Now traversing MMesh and AMesh - Probably need to add
+    #       traversal of regular Blender Objects besides meshes
+    nodeMesh = list(range(len(allM)))
     
     boneName   = [i.name for m in am for i in m.bid.lBone]
     boneParent = BId.BidGetIdParent([m.bid for m in am])
@@ -316,13 +371,14 @@ def BlendRun():
     
     #FIXME: Mesh name just using Node names
     meshName       = nodeName[:]
-    meshBoneCount  = [len(m.bid.lBone) for m in am]
-    meshVert       = [m.vts for m in am]
-    meshIndex      = [m.ics for m in am]
-    meshRootMatrix = [GetMeshArmature(m.bid.oMesh).matrix_world for m in am]
+    meshBoneCount  = lConcat([len(m.bid.lBone) for m in am], [0     for m in mm])
+    meshVert       = lConcat([m.vts for m in am],            [m.vts for m in mm])
+    meshIndex      = lConcat([m.ics for m in am],            [m.ics for m in mm])
+    meshRootMatrix = lConcat([GetMeshArmature(m.bid.oMesh).matrix_world for m in am],
+                             [m.bid.oMesh.matrix_world for m in mm])
     
     meshBoneWeight = [m.wts for m in am]
-
+    
     p = P()
     
     mkLenDelSec(p, b"NODENAME", [BytesFromStr(i) for i in nodeName])
