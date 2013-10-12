@@ -10,6 +10,7 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <numeric> /* ::std::accumulate */
 
 #include <exception>
 
@@ -19,6 +20,7 @@
 using namespace std;
 
 #define BU_MAX_INFLUENCING_BONE 4
+#define BU_MAX_TOTAL_BONE_PER_MESH 64
 
 class ExcItemExist  : public exception {};
 class ExcRecurseMax : public exception {};
@@ -258,6 +260,9 @@ public:
 		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
 		FillInt(SectionGetByName(sec, "MESHBONECOUNT").data, &outSD->meshBoneCount);
 
+		for (auto &i : outSD->meshBoneCount)
+			assert(i >= 0 && i <= BU_MAX_TOTAL_BONE_PER_MESH);
+
 		{
 			vector<string>         mVertChunks;
 			vector<vector<float> > mVert;
@@ -288,26 +293,31 @@ public:
 
 		{
 			int numMesh = outSD->meshName.size();
-			int numBone = outSD->boneName.size();
+			int numAllBone = outSD->boneName.size();
+			vector<int> meshBoneCount = outSD->meshBoneCount;
 
 			vector<string> mBWChunks;
 			vector<vector<vector<pair<int, float> > > > mBWeight;
 
 			FillLenDel(SectionGetByName(sec, "MESHBONEWEIGHT").data, &mBWChunks);
-			assert(mBWChunks.size() == outSD->meshName.size() * outSD->boneName.size());
+			assert(mBWChunks.size() == numAllBone);
+			assert(mBWChunks.size() == accumulate(meshBoneCount.begin(), meshBoneCount.end(), 0, [](int a, int x) { return a + x; }));
 
 			mBWeight = vector<vector<vector<pair<int, float> > > >(numMesh);
-			for (auto &i : mBWeight)
-				i = vector<vector<pair<int, float> > >(numBone);
+			for (int i = 0; i < numMesh; i++)
+				mBWeight[i] = vector<vector<pair<int, float> > >(meshBoneCount[i]);
 
-			for (int m = 0; m < numMesh; m++)
-				for (int b = 0; b < numBone; b++) {
+			int currBaseIdx = 0;
+			for (int m = 0; m < numMesh; m++) {
+				for (int b = 0; b < meshBoneCount[m]; b++) {
 					vector<pair<int, float> > v;
-					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[(numMesh * m) + b]), &v);
+					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[currBaseIdx + b]), &v);
 					mBWeight[m][b] = v;
 				}
+				currBaseIdx += meshBoneCount[m];
+			}
 
-				outSD->meshBoneWeight = mBWeight;
+			outSD->meshBoneWeight = mBWeight;
 		}
 	}
 
@@ -316,14 +326,20 @@ public:
 		FillChild(outSD->boneParent, &outSD->boneChild);
 
 		{
-			vector<vector<int> > meshBone(outSD->meshBoneCount.size());
-			for (int i = 0; i < outSD->meshBoneCount.size(); i++)
-				meshBone[i] = vector<int>(outSD->meshBoneCount[i]);
+			int         numMesh       = outSD->meshName.size();
+			vector<int> meshBoneCount = outSD->meshBoneCount;
 
-			int bCnt = 0;
-			for (int i = 0; i < outSD->meshBoneCount.size(); i++)
-				for (int j = 0; j < i; j++)
-					meshBone[i].push_back(bCnt++);
+			vector<vector<int> > meshBone(numMesh);
+			for (int i = 0; i < meshBone.size(); i++)
+				meshBone[i] = vector<int>(meshBoneCount[i]);
+
+			int currBaseIdx = 0;
+			for (int m = 0; m < numMesh; m++) {
+				for (int b = 0; b < meshBoneCount[m]; b++)
+					meshBone[m][b] = currBaseIdx + b;
+				currBaseIdx += meshBoneCount[m];
+			}
+
 			outSD->meshBone = meshBone;
 		}
 

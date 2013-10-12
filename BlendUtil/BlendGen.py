@@ -185,7 +185,7 @@ def ListGetIdParentBlenderSpecialCheck(lObject, fChecker):
     
     for o in lObject:
         assert o in mapEltId
-        assert o.parent == None or o.parent in mapIdElt
+        assert o.parent == None or o.parent in mapEltId
         
         assert fChecker(o)
         
@@ -292,7 +292,7 @@ def MeshMesh(oMesh):
     class DummyBid:
         def __init__(self, oMesh):
             self.oMesh = oMesh
-    bid = MMesh.DummyBid(oMesh)
+    bid = DummyBid(oMesh)
     
     return MMesh(bid, vts, ics)
 
@@ -377,7 +377,7 @@ def BlendRun():
     meshRootMatrix = lConcat([GetMeshArmature(m.bid.oMesh).matrix_world for m in am],
                              [m.bid.oMesh.matrix_world for m in mm])
     
-    meshBoneWeight = [m.wts for m in am]
+    meshBoneWeight = lConcat([m.wts for m in am],            [[]    for m in mm])
     
     p = P()
     
