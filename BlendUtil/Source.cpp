@@ -726,6 +726,14 @@ P * MakePFromFile(const string &fname) {
 SectionDataEx * BlendUtilMakeSectionDataEx(const string &fName) {
 	shared_ptr<P> p(MakePFromFile(fName.c_str()));
 	SectionDataEx *sd = Parse::MakeSectionDataEx(*p);
+
+	vector<DMat> nodeWorldIdentityRoot(sd->nodeName.size(), DMat::MakeIdentity());
+	vector<DMat> nodeWorldMatrix(sd->nodeName.size());
+	vector<DMat> boneWorldMatrix(sd->boneName.size());
+
+	MultiRootMatrixAccumulateWorld(sd->nodeMatrix, sd->nodeChild, sd->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
+	MultiRootMatrixAccumulateWorld(sd->boneMatrix, sd->boneChild, sd->boneParent, sd->meshRootMatrix, &boneWorldMatrix);
+
 	return sd;
 }
 
