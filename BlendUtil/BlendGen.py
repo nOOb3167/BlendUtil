@@ -319,10 +319,86 @@ def ArmaMesh(oMesh):
     
     return AMesh(bid, wts, vts, ics)
 
-def BlendMatToList(mat):
+def _BlendMatToListUnused(mat):
     l = [float(e) for vec in mat for e in vec]
     l = [(0.0 if abs(e) <= 0.0001 else e) for e in l]
     return l
+
+def BlendMatToListColumnMajor(mat):
+    assert len(mat.col) == 4 and len(mat.row) == 4
+    l = []
+    for col in range(len(mat.col)):
+        for row in range(len(mat.col)):
+            l.append(mat[row][col])
+    l = [(0.0 if abs(e) <= 0.0001 else e) for e in l]
+    l = [float(e) for e in l]
+    return l
+
+def BlendMatToList(mat):
+    return BlendMatToListColumnMajor(mat)
+
+def BlendMatCheck():
+    """Blender people are evil and change matrix indexing convention
+       randomly and break every script in existence.
+       Will attempt to make breakage attempts trip up checks and
+       break in a controlled fashion instead.
+       
+       The indexing convention at the time of writing (Blender 2.67b) is
+       Row major when converted to flat list like this:
+         l = [elt for vec in mat for elt in vec]
+       Mat[Row][Col] when indexed."""
+
+    try:
+        import mathutils
+    except ImportError:
+        assert 0
+        
+    from mathutils import Matrix, Vector
+    
+    def ZeroEq(a):
+        epsilon = 0.001
+        return True if abs(a) <= epsilon else False
+    
+    def MatrixEq(a, b):
+        la, lb = [e for vec in a for e in vec], [e for vec in b for e in vec]
+        assert len(a) == len(b)
+        return True if all([ZeroEq(e[0] - e[1]) for e in zip(la, lb)]) else False
+    
+    def MakeZero():
+        m = Matrix()
+        m.identity()
+        m[0][0], m[1][1], m[2][2], m[3][3] = 0.0, 0.0, 0.0, 0.0
+        return m
+    
+    m = MakeZero()
+    m.zero()
+    assert MatrixEq(MakeZero(), m)
+    
+    m = MakeZero()
+    assert all([ZeroEq(e) for vec in m for e in vec])
+    
+    m = MakeZero()
+    m[1][0] = 42.0
+    assert ZeroEq(m.row[1][0] - 42.0)
+    
+    m = MakeZero()
+    m.row[1][0] = 42.0
+    assert ZeroEq(m[1][0] - 42.0)
+    
+    m = MakeZero()
+    m.col[2] = Vector([10.0, 11.0, 12.0, 13.0])
+    l = [e for vec in m for e in vec]
+    assert l[2] == 10.0 and l[6] == 11.0 and l[10] == 12.0 and l[14] == 13.0
+    
+    m = Matrix([[0.0, 4.0, 8.0, 12.0],
+                [1.0, 5.0, 9.0, 13.0],
+                [2.0, 6.0, 10.0, 14.0],
+                [3.0, 7.0, 11.0, 15.0]])
+    m = m.transposed()
+    assert all([ZeroEq(e[0] - e[1]) for e in zip([e2 for vec in m for e2 in vec],
+                                                 range(0, 16))])
+    
+    return True
 
 def pm(m):
     for i in range(4):
@@ -335,6 +411,8 @@ def BytesFromStr(s):
     return bytes(s, encoding='UTF-8')
         
 def BlendRun():
+    assert BlendMatCheck()
+
     oMesh = [x for x in bpy.context.scene.objects if x.type == 'MESH']
     oArmaturedMesh = [x for x in oMesh if GetMeshArmature(x)]
     oMeshedMesh    = [x for x in oMesh if not GetMeshArmature(x)]
