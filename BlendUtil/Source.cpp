@@ -11,6 +11,7 @@
 #include <map>
 #include <algorithm>
 #include <numeric> /* ::std::accumulate */
+#include <functional> /* ::std::function */
 
 #include <exception>
 
@@ -29,8 +30,33 @@ class slice_str_t {};
 class slice_reslice_abs_t {};
 class slice_reslice_rel_t {};
 
+#define DMAT_RMAJOR_ELT(m,r,c) ((m).d[4*(r)+(c)])
+#define DMAT_ELT(m,r,c) (DMAT_RMAJOR_ELT((m),(r),(c)))
+
 struct DMat {
 	float d[16];
+
+	static DMat MakeIdentity() {
+		DMat m;
+		DMAT_ELT(m, 0, 0) = 1.0; DMAT_ELT(m, 0, 1) = 0.0; DMAT_ELT(m, 0, 2) = 0.0; DMAT_ELT(m, 0, 3) = 0.0;
+		DMAT_ELT(m, 1, 0) = 0.0; DMAT_ELT(m, 1, 1) = 1.0; DMAT_ELT(m, 1, 2) = 0.0; DMAT_ELT(m, 1, 3) = 0.0;
+		DMAT_ELT(m, 2, 0) = 0.0; DMAT_ELT(m, 2, 1) = 0.0; DMAT_ELT(m, 2, 2) = 1.0; DMAT_ELT(m, 2, 3) = 0.0;
+		DMAT_ELT(m, 3, 0) = 0.0; DMAT_ELT(m, 3, 1) = 0.0; DMAT_ELT(m, 3, 2) = 0.0; DMAT_ELT(m, 3, 3) = 1.0;
+		return m;
+	}
+
+	static DMat Multiply(const DMat &lhs, const DMat &rhs) {
+		DMat m;
+		for (int r = 0; r < 4; r++)
+			for (int c = 0; c < 4; c++) {
+				DMAT_ELT(m, r, c) = 0.0;
+				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 0) * DMAT_ELT(rhs, 0, c);
+				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 1) * DMAT_ELT(rhs, 1, c);
+				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 2) * DMAT_ELT(rhs, 2, c);
+				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 3) * DMAT_ELT(rhs, 3, c);
+			}
+		return m;
+	}
 };
 
 struct DVec3 {
@@ -192,6 +218,53 @@ public:
 
 	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
 };
+
+bool MultiRootReachabilityCheck(const vector<vector<int> > &child, const vector<int> &parent) {
+	assert(child.size() == parent.size());
+
+	vector<int> w(child.size(), 0);
+
+	std::function<void(int)> rec;
+	rec = [&rec, &child, &w](int state) {
+		w[state] += 1;
+		
+		for (auto &i : child[state])
+			rec(i);
+	};
+
+	for (int i = 0; i < parent.size(); i++)
+		if (parent[i] == -1)
+			rec(i);
+
+	bool allReachable   = accumulate(w.begin(), w.end(), true, [](int a, int x) { return a && x; });
+	bool allReachedOnce = accumulate(w.begin(), w.end(), true, [](int a, int x) { return a && (x == 1); });
+
+	return allReachable && allReachedOnce;
+}
+
+void MatrixAccumulateWorld(const vector<DMat> &mLocal, const vector<vector<int> > &child, int state, const DMat &mInitial, vector<DMat> *oWorld) {
+	assert(oWorld->size() == mLocal.size());
+
+	std::function<void(int, const DMat &)> rec;
+	rec = [&rec, &mLocal, &child, &oWorld](int state, const DMat &acc) {
+		DMat newAcc = DMat::Multiply(acc, mLocal[state]);
+		(*oWorld)[state] = newAcc;
+
+		for (auto &i : child[state])
+			rec(i, newAcc);
+	};
+
+	rec(state, mInitial);
+}
+
+void MultiRootMatrixAccumulateWorld(const vector<DMat> &mLocal, const vector<vector<int> > &child, const vector<int> &parent, const vector<DMat> root, vector<DMat> *oWorld) {
+	assert(mLocal.size() == child.size() && mLocal.size() == parent.size() && mLocal.size() == oWorld->size());
+	assert(MultiRootReachabilityCheck(child, parent));
+
+	for (int i = 0; i < parent.size(); i++)
+		if (parent[i] == -1)
+			MatrixAccumulateWorld(mLocal, child, i, root[i], oWorld);
+}
 
 class SectionDataEx : public SectionData {
 public:
