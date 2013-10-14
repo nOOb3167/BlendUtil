@@ -34,6 +34,14 @@ class Ctx : public oglplus::Context {};
 
 namespace Cruft {
 
+	oglplus::Mat4f DMatToOgl(const DMat &m) {
+		return oglplus::Mat4f(
+			DMAT_ELT(m, 0, 0), DMAT_ELT(m, 0, 1), DMAT_ELT(m, 0, 2), DMAT_ELT(m, 0, 3),
+			DMAT_ELT(m, 1, 0), DMAT_ELT(m, 1, 1), DMAT_ELT(m, 1, 2), DMAT_ELT(m, 1, 3),
+			DMAT_ELT(m, 2, 0), DMAT_ELT(m, 2, 1), DMAT_ELT(m, 2, 2), DMAT_ELT(m, 2, 3),
+			DMAT_ELT(m, 3, 0), DMAT_ELT(m, 3, 1), DMAT_ELT(m, 3, 2), DMAT_ELT(m, 3, 3));
+	}
+
 	struct ExBase {
 		int tick;
 		ExBase() : tick(-1) {}
@@ -249,23 +257,41 @@ namespace Md {
 	struct Ex1 : public ExBase {
 		Md::ShdTexSimple shd;
 		shared_ptr<SectionDataEx> sde;
-		shared_ptr<Md::MdT> mdt;
-		shared_ptr<Md::ShdTexSimple::MdD> mdd;
+		shared_ptr<Md::MdT> mdt0, mdt1;
+		shared_ptr<Md::ShdTexSimple::MdD> mdd0, mdd1;
 
 		Ex1() {
 			sde = shared_ptr<SectionDataEx>(BlendUtilMakeSectionDataEx("../tmpdata.dat"));
-			mdd = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0));
+
+			assert(sde->meshName.size() == 2);
+			mdd0 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0));
+			mdd1 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 1));
 		}
 
 		void Display() {
 			ExBase::Display();
 
-			mdt = shared_ptr<Md::MdT>(new Md::MdT(
+			vector<DMat> nodeWorldIdentityRoot(sde->nodeName.size(), DMat::MakeIdentity());
+			vector<DMat> nodeWorldMatrix(sde->nodeName.size());
+			vector<DMat> boneWorldMatrix(sde->boneName.size());
+
+			MultiRootMatrixAccumulateWorld(sde->nodeMatrix, sde->nodeChild, sde->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
+			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
+
+			mdt0 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
-				ModelMatrixf()));
+				DMatToOgl(nodeWorldMatrix[0])));
+			mdt1 = shared_ptr<Md::MdT>(new Md::MdT(
+				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
+				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
+				DMatToOgl(nodeWorldMatrix[1])));
 
-			shd.Prime(*mdt, *mdd);
+			shd.Prime(*mdt0, *mdd0);
+			shd.Draw();
+			shd.UnPrime();
+
+			shd.Prime(*mdt1, *mdd1);
 			shd.Draw();
 			shd.UnPrime();
 		}

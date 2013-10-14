@@ -31,7 +31,8 @@ class slice_reslice_abs_t {};
 class slice_reslice_rel_t {};
 
 #define DMAT_RMAJOR_ELT(m,r,c) ((m).d[4*(r)+(c)])
-#define DMAT_ELT(m,r,c) (DMAT_RMAJOR_ELT((m),(r),(c)))
+#define DMAT_CMAJOR_ELT(m,r,c) ((m).d[4*(c)+(r)])
+#define DMAT_ELT(m,r,c) (DMAT_CMAJOR_ELT((m),(r),(c)))
 
 struct DMat {
 	float d[16];
