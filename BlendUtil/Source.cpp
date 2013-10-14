@@ -46,6 +46,32 @@ struct DMat {
 		return m;
 	}
 
+	static DMat MakeFromVec(
+		float v0, float v1, float v2, float v3,
+		float v4, float v5, float v6, float v7,
+		float v8, float v9, float v10, float v11,
+		float v12, float v13, float v14, float v15)
+	{
+		DMat m;
+		float v[] = {
+			v0, v1, v2, v3,
+			v4, v5, v6, v7,
+			v8, v9, v10, v11,
+			v12, v13, v14, v15,
+			};
+		assert(sizeof v / sizeof *v == 16);
+		memcpy(m.d, v, 16 * sizeof(float));
+		return Transpose(m);
+	}
+
+	static DMat Transpose(const DMat &a) {
+		DMat m;
+		for (int i = 0; i < 4; i++)
+			for (int j = 0; j < 4; j++)
+				DMAT_ELT(m, i, j) = DMAT_ELT(a, j, i);
+		return m;
+	}
+
 	static DMat Multiply(const DMat &lhs, const DMat &rhs) {
 		DMat m;
 		for (int r = 0; r < 4; r++)
@@ -57,6 +83,150 @@ struct DMat {
 				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 3) * DMAT_ELT(rhs, 3, c);
 			}
 		return m;
+	}
+
+	static DMat InvertNs(const DMat &m) {
+		DMat oM;
+		int r = InvertEx(m, &oM);
+		assert(r);
+		return oM;
+	}
+
+	static bool InvertEx(const DMat &iMat, DMat *oMat) {
+		/* This function accepts Column major order layout. */
+		/* Remember Row/Column major does matter, as: $(A^T)^-1 = (A^-1)^T$.
+		   Wrong major order (Row major) is the same as inputting in $A^T$ instead of $A$ into the inversion function.
+		   The wanted result is $(A^T)^-1 = A^-1$, but by the above, will result in getting out $(A^-1)^T$.
+		   An extra transpose may be neccessary to bring $(A^-1)^T^T = A^-1$.*/
+		const float *m = iMat.d;
+		float *invOut  = oMat->d;
+
+		float inv[16], det;
+		int i;
+
+		inv[0] = m[5]  * m[10] * m[15] - 
+			m[5]  * m[11] * m[14] - 
+			m[9]  * m[6]  * m[15] + 
+			m[9]  * m[7]  * m[14] +
+			m[13] * m[6]  * m[11] - 
+			m[13] * m[7]  * m[10];
+
+		inv[4] = -m[4]  * m[10] * m[15] + 
+			m[4]  * m[11] * m[14] + 
+			m[8]  * m[6]  * m[15] - 
+			m[8]  * m[7]  * m[14] - 
+			m[12] * m[6]  * m[11] + 
+			m[12] * m[7]  * m[10];
+
+		inv[8] = m[4]  * m[9] * m[15] - 
+			m[4]  * m[11] * m[13] - 
+			m[8]  * m[5] * m[15] + 
+			m[8]  * m[7] * m[13] + 
+			m[12] * m[5] * m[11] - 
+			m[12] * m[7] * m[9];
+
+		inv[12] = -m[4]  * m[9] * m[14] + 
+			m[4]  * m[10] * m[13] +
+			m[8]  * m[5] * m[14] - 
+			m[8]  * m[6] * m[13] - 
+			m[12] * m[5] * m[10] + 
+			m[12] * m[6] * m[9];
+
+		inv[1] = -m[1]  * m[10] * m[15] + 
+			m[1]  * m[11] * m[14] + 
+			m[9]  * m[2] * m[15] - 
+			m[9]  * m[3] * m[14] - 
+			m[13] * m[2] * m[11] + 
+			m[13] * m[3] * m[10];
+
+		inv[5] = m[0]  * m[10] * m[15] - 
+			m[0]  * m[11] * m[14] - 
+			m[8]  * m[2] * m[15] + 
+			m[8]  * m[3] * m[14] + 
+			m[12] * m[2] * m[11] - 
+			m[12] * m[3] * m[10];
+
+		inv[9] = -m[0]  * m[9] * m[15] + 
+			m[0]  * m[11] * m[13] + 
+			m[8]  * m[1] * m[15] - 
+			m[8]  * m[3] * m[13] - 
+			m[12] * m[1] * m[11] + 
+			m[12] * m[3] * m[9];
+
+		inv[13] = m[0]  * m[9] * m[14] - 
+			m[0]  * m[10] * m[13] - 
+			m[8]  * m[1] * m[14] + 
+			m[8]  * m[2] * m[13] + 
+			m[12] * m[1] * m[10] - 
+			m[12] * m[2] * m[9];
+
+		inv[2] = m[1]  * m[6] * m[15] - 
+			m[1]  * m[7] * m[14] - 
+			m[5]  * m[2] * m[15] + 
+			m[5]  * m[3] * m[14] + 
+			m[13] * m[2] * m[7] - 
+			m[13] * m[3] * m[6];
+
+		inv[6] = -m[0]  * m[6] * m[15] + 
+			m[0]  * m[7] * m[14] + 
+			m[4]  * m[2] * m[15] - 
+			m[4]  * m[3] * m[14] - 
+			m[12] * m[2] * m[7] + 
+			m[12] * m[3] * m[6];
+
+		inv[10] = m[0]  * m[5] * m[15] - 
+			m[0]  * m[7] * m[13] - 
+			m[4]  * m[1] * m[15] + 
+			m[4]  * m[3] * m[13] + 
+			m[12] * m[1] * m[7] - 
+			m[12] * m[3] * m[5];
+
+		inv[14] = -m[0]  * m[5] * m[14] + 
+			m[0]  * m[6] * m[13] + 
+			m[4]  * m[1] * m[14] - 
+			m[4]  * m[2] * m[13] - 
+			m[12] * m[1] * m[6] + 
+			m[12] * m[2] * m[5];
+
+		inv[3] = -m[1] * m[6] * m[11] + 
+			m[1] * m[7] * m[10] + 
+			m[5] * m[2] * m[11] - 
+			m[5] * m[3] * m[10] - 
+			m[9] * m[2] * m[7] + 
+			m[9] * m[3] * m[6];
+
+		inv[7] = m[0] * m[6] * m[11] - 
+			m[0] * m[7] * m[10] - 
+			m[4] * m[2] * m[11] + 
+			m[4] * m[3] * m[10] + 
+			m[8] * m[2] * m[7] - 
+			m[8] * m[3] * m[6];
+
+		inv[11] = -m[0] * m[5] * m[11] + 
+			m[0] * m[7] * m[9] + 
+			m[4] * m[1] * m[11] - 
+			m[4] * m[3] * m[9] - 
+			m[8] * m[1] * m[7] + 
+			m[8] * m[3] * m[5];
+
+		inv[15] = m[0] * m[5] * m[10] - 
+			m[0] * m[6] * m[9] - 
+			m[4] * m[1] * m[10] + 
+			m[4] * m[2] * m[9] + 
+			m[8] * m[1] * m[6] - 
+			m[8] * m[2] * m[5];
+
+		det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+
+		if (det == 0)
+			return false;
+
+		det = 1.0f / det;
+
+		for (i = 0; i < 16; i++)
+			invOut[i] = inv[i] * det;
+
+		return true;
 	}
 };
 
