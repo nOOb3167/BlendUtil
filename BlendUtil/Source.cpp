@@ -390,6 +390,18 @@ public:
 	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
 };
 
+class SectionDataEx : public SectionData {
+public:
+	vector<vector<int> > nodeChild;
+	vector<vector<int> > boneChild;
+
+	vector<vector<int> > meshBone;
+
+	/* [Mesh0: [Vert0: id*BU_MAX_INFLUENCING_BONE ...] ...] */
+	vector<vector<int> >   meshVertId;
+	vector<vector<float> > meshVertWt;
+};
+
 bool MultiRootReachabilityCheck(const vector<vector<int> > &child, const vector<int> &parent) {
 	assert(child.size() == parent.size());
 
@@ -436,18 +448,6 @@ void MultiRootMatrixAccumulateWorld(const vector<DMat> &mLocal, const vector<vec
 		if (parent[i] == -1)
 			MatrixAccumulateWorld(mLocal, child, i, root[i], oWorld);
 }
-
-class SectionDataEx : public SectionData {
-public:
-	vector<vector<int> > nodeChild;
-	vector<vector<int> > boneChild;
-
-	vector<vector<int> > meshBone;
-
-	/* [Mesh0: [Vert0: id*BU_MAX_INFLUENCING_BONE ...] ...] */
-	vector<vector<int> >   meshVertId;
-	vector<vector<float> > meshVertWt;
-};
 
 class Parse {
 public:
