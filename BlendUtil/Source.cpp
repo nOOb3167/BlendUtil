@@ -58,7 +58,7 @@ struct DMat {
 			v4, v5, v6, v7,
 			v8, v9, v10, v11,
 			v12, v13, v14, v15,
-			};
+		};
 		assert(sizeof v / sizeof *v == 16);
 		memcpy(m.d, v, 16 * sizeof(float));
 		return Transpose(m);
@@ -82,7 +82,7 @@ struct DMat {
 				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 2) * DMAT_ELT(rhs, 2, c);
 				DMAT_ELT(m, r, c) += DMAT_ELT(lhs, r, 3) * DMAT_ELT(rhs, 3, c);
 			}
-		return m;
+			return m;
 	}
 
 	static DMat InvertNs(const DMat &m) {
@@ -95,9 +95,9 @@ struct DMat {
 	static bool InvertEx(const DMat &iMat, DMat *oMat) {
 		/* This function accepts Column major order layout. */
 		/* Remember Row/Column major does matter, as: $(A^T)^-1 = (A^-1)^T$.
-		   Wrong major order (Row major) is the same as inputting in $A^T$ instead of $A$ into the inversion function.
-		   The wanted result is $(A^T)^-1 = A^-1$, but by the above, will result in getting out $(A^-1)^T$.
-		   An extra transpose may be neccessary to bring $(A^-1)^T^T = A^-1$.*/
+		Wrong major order (Row major) is the same as inputting in $A^T$ instead of $A$ into the inversion function.
+		The wanted result is $(A^T)^-1 = A^-1$, but by the above, will result in getting out $(A^-1)^T$.
+		An extra transpose may be neccessary to bring $(A^-1)^T^T = A^-1$.*/
 		const float *m = iMat.d;
 		float *invOut  = oMat->d;
 
@@ -410,7 +410,7 @@ bool MultiRootReachabilityCheck(const vector<vector<int> > &child, const vector<
 	std::function<void(int)> rec;
 	rec = [&rec, &child, &w](int state) {
 		w[state] += 1;
-		
+
 		for (auto &i : child[state])
 			rec(i);
 	};
@@ -447,6 +447,28 @@ void MultiRootMatrixAccumulateWorld(const vector<DMat> &mLocal, const vector<vec
 	for (int i = 0; i < parent.size(); i++)
 		if (parent[i] == -1)
 			MatrixAccumulateWorld(mLocal, child, i, root[i], oWorld);
+}
+
+void MatrixMeshToBone(const vector<int> &meshBoneCount, const vector<DMat> &nodeWorldMatrix, const vector<DMat> &boneWorldMatrix, vector<DMat> *oWorld) {
+	int numMesh = meshBoneCount.size();
+	assert(accumulate(meshBoneCount.begin(), meshBoneCount.end(), 0, [](int a, int x) { return a + x; }) == boneWorldMatrix.size());
+	assert(oWorld->size() == boneWorldMatrix.size());
+
+	vector<DMat> ret;
+
+	int currBaseIdx = 0;
+	for (int m = 0; m < numMesh; m++) {
+		for (int b = 0; b < meshBoneCount[m]; b++) {
+			const DMat &mCurMeshWorld = nodeWorldMatrix[m];
+			const DMat &mCurBoneWorld = boneWorldMatrix[currBaseIdx + b];
+			const DMat mCurBoneWorldInv = DMat::InvertNs(mCurBoneWorld);
+			const DMat mMeshBone = DMat::Multiply(mCurMeshWorld, mCurBoneWorldInv);
+			ret.push_back(mMeshBone);
+		}
+		currBaseIdx += meshBoneCount[m];
+	}
+
+	*oWorld = ret;
 }
 
 class Parse {
@@ -901,9 +923,12 @@ SectionDataEx * BlendUtilMakeSectionDataEx(const string &fName) {
 	vector<DMat> nodeWorldIdentityRoot(sd->nodeName.size(), DMat::MakeIdentity());
 	vector<DMat> nodeWorldMatrix(sd->nodeName.size());
 	vector<DMat> boneWorldMatrix(sd->boneName.size());
+	vector<DMat> boneMeshToBoneMatrix(sd->boneName.size());
 
 	MultiRootMatrixAccumulateWorld(sd->nodeMatrix, sd->nodeChild, sd->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
 	MultiRootMatrixAccumulateWorld(sd->boneMatrix, sd->boneChild, sd->boneParent, sd->meshRootMatrix, &boneWorldMatrix);
+
+	MatrixMeshToBone(sd->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
 
 	return sd;
 }
