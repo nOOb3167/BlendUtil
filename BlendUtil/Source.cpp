@@ -775,7 +775,9 @@ public:
 		     In Blender, weight painting a Bone influence always produces weights in [0.0, 1.0].
 			 Thus painting multiple Bone influences produces multiple weights, each in [0.0, 1.0].
 		   But of course, the weights have to sum to 1.0 and not higher (Or lower).
-		   (IIRC that dual quaternion skinning paper mentioned summing to 1.0 is required for coordinate system invariance of the Bone blending step)
+		   (https://www.cs.tcd.ie/publications/tech-reports/reports.06/TCD-CS-2006-46.pdf
+		    IIRC that dual quaternion skinning paper mentioned summing to 1.0 is required for coordinate system invariance of the Bone blending step.
+		    """It is interesting to note that coordinate-invariance is also the reason why the weights w1,...,wn of a linear combination of points are re- quired to satisfy the equation w1+...+wn=1.""")
 		   Additionally influA having the same Blender weight as influB should result in having the same final weight.
 		   And InfluA having a Blender weight 'n' times as high as InfluB should result in having 'n' times the final InfluB influence.
 		   As Blender people hate documentation and would never accidentally tell what the correct conversion to final usable weight is,
