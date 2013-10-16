@@ -234,6 +234,11 @@ struct DVec3 {
 	float d[3];
 };
 
+bool ScaZero(float a) {
+	const float delta = 0.001f;
+	return (std::fabsf(a) < delta);
+}
+
 class Slice {
 	int beg, end;
 	shared_ptr<string> s;
@@ -681,6 +686,8 @@ public:
 		vector<vector<int> >   meshVertId(numMesh);
 		vector<vector<float> > meshVertWt(numMesh);
 
+		/* FIXME: Currently generating influences even for meshes with no Bones.
+				  (All zero weights for every vertex of a boneless mesh) */
 		for (int i = 0; i < numMesh; i++)
 			FillMeshVertInfluenceOne(meshVert[i], meshBoneWeight[i], &meshVertId[i], &meshVertWt[i]);
 
@@ -763,6 +770,21 @@ public:
 
 		/* Cut if have too many influencing bones, zero pad if too few */
 		finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
+
+		/* Normalize weights:
+		     In Blender, weight painting a Bone influence always produces weights in [0.0, 1.0].
+			 Thus painting multiple Bone influences produces multiple weights, each in [0.0, 1.0].
+		   But of course, the weights have to sum to 1.0 and not higher (Or lower).
+		   (IIRC that dual quaternion skinning paper mentioned summing to 1.0 is required for coordinate system invariance of the Bone blending step)
+		   Additionally influA having the same Blender weight as influB should result in having the same final weight.
+		   And InfluA having a Blender weight 'n' times as high as InfluB should result in having 'n' times the final InfluB influence.
+		   As Blender people hate documentation and would never accidentally tell what the correct conversion to final usable weight is,
+		   hopefully the formula following formula, satisfying the above constraints is adequate:
+		     finalWeights = map(lambda x: x / sum(influWeights), influWeights) # Just a division by sum of influences
+			 The division happens only if nonzero influences exist for the vertex (Otherwise left at zero). */
+		float influWeightSum = accumulate(finals.begin(), finals.end(), 0.0f, [](float a, pair<int, float> x) { return a + x.second; });
+		if (ScaZero(influWeightSum))
+			transform(finals.begin(), finals.end(), finals.begin(), [&influWeightSum](pair<int, float> x) { return make_pair(x.first, x.second / influWeightSum); });
 
 		return finals;
 	}
