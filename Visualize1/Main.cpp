@@ -274,14 +274,19 @@ namespace Md {
 			vector<DMat> nodeWorldIdentityRoot(sde->nodeName.size(), DMat::MakeIdentity());
 			vector<DMat> nodeWorldMatrix(sde->nodeName.size());
 			vector<DMat> boneWorldMatrix(sde->boneName.size());
+			vector<DMat> boneMeshToBoneMatrix(sde->boneName.size());
 
 			MultiRootMatrixAccumulateWorld(sde->nodeMatrix, sde->nodeChild, sde->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
 			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
+			MatrixMeshToBone(sde->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
+
+			DMat nm0 = DMat::Multiply(boneWorldMatrix[0], boneMeshToBoneMatrix[0]);
 
 			mdt0 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
-				DMatToOgl(nodeWorldMatrix[0])));
+				//DMatToOgl(nodeWorldMatrix[0])));
+				DMatToOgl(nm0)));
 			mdt1 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),

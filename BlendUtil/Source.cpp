@@ -927,7 +927,6 @@ SectionDataEx * BlendUtilMakeSectionDataEx(const string &fName) {
 
 	MultiRootMatrixAccumulateWorld(sd->nodeMatrix, sd->nodeChild, sd->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
 	MultiRootMatrixAccumulateWorld(sd->boneMatrix, sd->boneChild, sd->boneParent, sd->meshRootMatrix, &boneWorldMatrix);
-
 	MatrixMeshToBone(sd->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
 
 	return sd;
