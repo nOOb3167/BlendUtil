@@ -785,7 +785,7 @@ public:
 		     finalWeights = map(lambda x: x / sum(influWeights), influWeights) # Just a division by sum of influences
 			 The division happens only if nonzero influences exist for the vertex (Otherwise left at zero). */
 		float influWeightSum = accumulate(finals.begin(), finals.end(), 0.0f, [](float a, pair<int, float> x) { return a + x.second; });
-		if (ScaZero(influWeightSum))
+		if (!ScaZero(influWeightSum))
 			transform(finals.begin(), finals.end(), finals.begin(), [&influWeightSum](pair<int, float> x) { return make_pair(x.first, x.second / influWeightSum); });
 
 		return finals;
