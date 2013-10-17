@@ -326,7 +326,9 @@ namespace Md {
 			shared_ptr<Buffer> meshVertId;
 			shared_ptr<Buffer> meshVertWt;
 
-			MdD(const SectionDataEx &sde, int meshId) :
+			vector<DMat> boneMeshToBoneMatrix;
+
+			MdD(const SectionDataEx &sde, int meshId, const vector<DMat> &mtbm) :
 				triCnt(sde.meshIndex[meshId].size() / 3),
 				id(new Buffer()),
 				vt(new Buffer()),
@@ -337,31 +339,21 @@ namespace Md {
 
 				/* Mesh */
 
-				//id->Bind(oglplus::BufferOps::Target::Array);
-				//Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshIndex[meshId]));
+				id->Bind(oglplus::BufferOps::Target::Array);
+				Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshIndex[meshId]));
 
-				//vt->Bind(oglplus::BufferOps::Target::Array);
-				//Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVert[meshId]));
-				
-				{
-					id->Bind(oglplus::BufferOps::Target::Array);
-					vector<GLuint> v; transform(sde.meshIndex[meshId].begin(), sde.meshIndex[meshId].end(), back_inserter(v), [](int i) { return i; });
-					Buffer::Data(oglplus::BufferOps::Target::Array, v);
-				}
-
-				{
-					vt->Bind(oglplus::BufferOps::Target::Array);
-					vector<GLfloat> v; transform(sde.meshVert[meshId].begin(), sde.meshVert[meshId].end(), back_inserter(v), [](float i) { return i; });
-					Buffer::Data(oglplus::BufferOps::Target::Array, v);
-				}
+				vt->Bind(oglplus::BufferOps::Target::Array);
+				Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVert[meshId]));
 
 				/* Bone */
 
-				//meshVertId->Bind(oglplus::BufferOps::Target::Array);
-				//Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshVertId[meshId]));
+				meshVertId->Bind(oglplus::BufferOps::Target::Array);
+				Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshVertId[meshId]));
 
-				//meshVertWt->Bind(oglplus::BufferOps::Target::Array);
-				//Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVertWt[meshId]));
+				meshVertWt->Bind(oglplus::BufferOps::Target::Array);
+				Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVertWt[meshId]));
+
+				boneMeshToBoneMatrix = mtbm;
 			}
 		};
 
@@ -375,7 +367,7 @@ namespace Md {
 			va(new VertexArray()),
 			triCnt(0) {}
 
-		void Prime(const MdT &mt, const MdD &md) {
+		void Prime(const MdT &mt, const MdD &md, const vector<DMat> &boneWorldMatrix) {
 			triCnt = md.triCnt;
 
 			va->Bind();
@@ -389,9 +381,9 @@ namespace Md {
 
 			/* Bone */
 
-			//EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneId", md.meshVertId, 4, UnsignedInt);
+			EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneId", md.meshVertId, 4, UnsignedInt);
 
-			//EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneWt", md.meshVertWt, 4, Float);
+			EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneWt", md.meshVertWt, 4, Float);
 
 			/* MdT */
 
@@ -399,7 +391,16 @@ namespace Md {
 			ProgramUniform<Mat4f>(*prog, "CameraMatrix") = mt.CameraMatrix;
 			ProgramUniform<Mat4f>(*prog, "ModelMatrix") = mt.ModelMatrix;
 
+			/* FIXME: TODO: Identity... */
 			OptionalProgramUniform<Mat4f>(*prog, "MeshMat") = ModelMatrixf();
+
+			{
+				vector<oglplus::Mat4f> v;
+				assert(boneWorldMatrix.size() == md.boneMeshToBoneMatrix.size());
+				for (int i = 0; i < boneWorldMatrix.size(); i++)
+					v.push_back(DMatToOgl(DMat::Multiply(boneWorldMatrix[i], md.boneMeshToBoneMatrix[i])));
+				OptionalProgramUniform<Mat4f>(*prog, "BoneMat").Set(v);
+			}
 
 			Validate();
 		}
@@ -431,14 +432,6 @@ namespace Md {
 		Ex1() {
 			sde = shared_ptr<SectionDataEx>(BlendUtilMakeSectionDataEx("../tmpdata.dat"));
 
-			assert(sde->meshName.size() == 2);
-			mdd0 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0));
-			mdd1 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 1));
-		}
-
-		void Display() {
-			ExBase::Display();
-
 			vector<DMat> nodeWorldIdentityRoot(sde->nodeName.size(), DMat::MakeIdentity());
 			vector<DMat> nodeWorldMatrix(sde->nodeName.size());
 			vector<DMat> boneWorldMatrix(sde->boneName.size());
@@ -448,7 +441,18 @@ namespace Md {
 			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
 			MatrixMeshToBone(sde->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
 
-			DMat nm0 = DMat::Multiply(boneWorldMatrix[0], boneMeshToBoneMatrix[0]);
+			assert(sde->meshName.size() == 2);
+			mdd0 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0, boneMeshToBoneMatrix));
+			mdd1 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 1, boneMeshToBoneMatrix));
+		}
+
+		void Display() {
+			ExBase::Display();
+
+			vector<DMat> boneWorldMatrix(sde->boneName.size());
+			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
+
+			//DMat nm0 = DMat::Multiply(boneWorldMatrix[0], boneMeshToBoneMatrix[0]);
 
 			mdt0 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
@@ -459,13 +463,13 @@ namespace Md {
 			//	CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
 			//	DMatToOgl(nodeWorldMatrix[1])));
 
-			shd.Prime(*mdt0, *mdd0);
+			shd.Prime(*mdt0, *mdd0, boneWorldMatrix);
 			shd.Draw();
 			shd.UnPrime();
 
-			shd.Prime(*mdt1, *mdd1);
-			shd.Draw();
-			shd.UnPrime();
+			//shd.Prime(*mdt1, *mdd1);
+			//shd.Draw();
+			//shd.UnPrime();
 		}
 	};
 

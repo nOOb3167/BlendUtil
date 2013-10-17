@@ -18,7 +18,6 @@ bool VecEq4(vec4 a, vec4 b) {
 void main(void) {
     vTexCoord = TexCoord;
 
-    /*
     vec4 blendPos = vec4(0,0,0,0);
     for (int i = 0; i < 4; ++i) {
         blendPos += BoneWt[i] * (BoneMat[BoneId[i]] * Position);
@@ -28,9 +27,6 @@ void main(void) {
         gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * MeshMat * Position;
     else
         gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * blendPos;
-      */  
-      
-    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * Position;
 }
 
 ====== fsBone @@@@@@
