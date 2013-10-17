@@ -54,9 +54,9 @@ namespace Cruft {
 	string StrTrim(const string &s) {
 		const char *str = s.c_str();
 		while(*str && isspace(*str)) str++;
-		const char *end = str + strlen(str) - 1;
-		while(end >= str && isspace(*end)) end--;
-		return string(str, end + 1);
+		const char *end = str + strlen(str);
+		while(end > str && isspace(*(end-1))) end--;
+		return string(str, end);
 	}
 
 	string ReadFile(const string &fname) {
