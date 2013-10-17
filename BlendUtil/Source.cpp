@@ -4,6 +4,7 @@
 /* SCNd32 is 2013 only, thanks MSVC */
 /* #include <inttypes.h> */
 #include <cstdint>
+#include <cctype> /* isspace */
 
 #include <memory>
 #include <string>
@@ -291,6 +292,49 @@ public:
 	P(const Slice &s) : p(0), s(s) {}
 	P(const P &other) : p(other.p), s(other.s) {}
 	~P() {}
+
+	/* Cruft Start */
+	void OptSkipWs() {
+		P w(*this);
+		while (w.BytesLeft() && isspace(*(w.s.CharPtrRel(w.p))))
+			w.AdvanceN(1);
+		*this = w;
+	}
+
+	bool OptAfterNextDelShallow(const string &del) {
+		P w(*this);
+		w.OptSkipWs();
+
+		if (w.BytesLeft() >= del.size() && strncmp(del.c_str(), w.s.CharPtrRel(w.p), del.size()) == 0)
+			return (w.AdvanceN(del.size()), *this = w, true);
+
+		return false;
+	}
+
+	bool OptAfterNextDelDeep(const string &del) {
+		P w(*this);
+		int r;
+		/* FIXME: One day find out what happens if BytesLeft() == 0 and del.size() == 0 */
+		while (w.BytesLeft() >= del.size() && (r = strncmp(del.c_str(), w.s.CharPtrRel(w.p), del.size())) != 0)
+			w.AdvanceN(1);
+		if (r == 0)
+			return (w.AdvanceN(del.size()), *this = w, true);
+		return false;
+	}
+
+	string OptRawSpanTo(const P &rhs) {
+		/* FIXME: All uncompliant */
+		assert(s.CharPtrRel(p) <= rhs.s.CharPtrRel(rhs.p) && BytesLeft() >= rhs.s.CharPtrRel(rhs.p) - s.CharPtrRel(p));
+		return string(s.CharPtrRel(p), rhs.s.CharPtrRel(rhs.p) - s.CharPtrRel(p));
+	}
+
+	string OptRawSpanToEnd() {
+		P a(*this);
+		assert(a.BytesLeft() >= 0);
+		a.AdvanceN(a.BytesLeft());
+		return OptRawSpanTo(a);
+	}
+	/* Cruft End */
 
 	int BytesLeft() const {
 		return s.BytesLeftRel(p);

@@ -1,7 +1,8 @@
 #include <cstdlib>
 #include <cassert>
+#include <cctype> /* isspace */
 
-#include <functional>
+#include <functional> /* std::function */
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -27,12 +28,120 @@
 #define G_MAX_BONES_UNIFORM     30
 #define G_MAX_BONES_INFLUENCING 4
 
+#define EX_OGLPLUS_ERROR_WRAP_START()                      \
+	try {
+#define EX_OGLPLUS_ERROR_WRAP_MIDDLE()                     \
+	} catch(oglplus::Error &e) {                           \
+	  {                                                    \
+	  if (dynamic_cast<oglplus::CompileError *>(&e))     \
+	  std::cerr << ((oglplus::CompileError &)e).Log(); \
+	  if (dynamic_cast<oglplus::LinkError *>(&e))        \
+	  std::cerr << ((oglplus::LinkError &)e).Log();    \
+	  OglGenErr(e);                                      \
+	  }                                                    \
+	  {
+#define EX_OGLPLUS_ERROR_WRAP_END()                        \
+	  }                                                    \
+	}
+
 using namespace oglplus;
 using namespace std;
 
 class Ctx : public oglplus::Context {};
 
 namespace Cruft {
+
+	string StrTrim(const string &s) {
+		const char *str = s.c_str();
+		while(*str && isspace(*str)) str++;
+		const char *end = str + strlen(str) - 1;
+		while(end >= str && isspace(*end)) end--;
+		return string(str, end + 1);
+	}
+
+	string ReadFile(const string &fname) {
+		int r;
+		char buf[1024];
+		string acc;
+		FILE *f;
+
+		f = fopen(fname.c_str(), "rb");
+		assert(f);
+
+		while ((r = fread(buf, 1, 1024, f)))
+			acc.append(buf, r);
+
+		assert(!ferror(f));
+		assert(feof(f));
+
+		fclose(f);
+
+		return acc;
+	}
+
+	map<string, string> ParseShdFromString(const string &acc) {
+		map<string, string> mapNameShd;
+
+		P p(acc);
+
+		while (true) {
+			string markS("======"), markE("@@@@@@");
+			P pS(p);
+			bool afterNextDelS = pS.OptAfterNextDelShallow(markS);
+			P pE(pS);
+			bool afterNextDelE = pE.OptAfterNextDelDeep(markE);
+
+			if (! (afterNextDelS && afterNextDelE))
+				break;
+
+			string shdNameSpan(pS.OptRawSpanTo(pE));
+			assert(shdNameSpan.size() >= markE.size() && equal(markE.begin(), markE.end(), shdNameSpan.rbegin()));
+			string shdName(StrTrim(shdNameSpan.substr(0, shdNameSpan.size() - markE.size())));
+			
+			P pContentS(pE);
+			P pContentE(pContentS);
+			bool afterNextDelContent = pContentE.OptAfterNextDelDeep(markS);
+			if (afterNextDelContent) {
+				pContentE.AdvanceN(- (int)markS.size());
+				mapNameShd[shdName] = StrTrim(pContentS.OptRawSpanTo(pContentE));
+			} else {
+				mapNameShd[shdName] = StrTrim(pContentS.OptRawSpanToEnd());
+			}
+
+			p = pContentE;
+		}
+
+		return mapNameShd;
+	}
+
+	map<string, string> ParseShdFromFile(const string &fname) {
+		string acc(ReadFile(fname));
+		return ParseShdFromString(acc);
+	}
+
+	int _dummy_sprintf(string *o, char format[], ...) {
+		int r;
+		char buf[20];
+
+		va_list args;
+		va_start(args, format);
+		r = vsnprintf(buf, sizeof buf, format, args);
+		va_end(args);
+
+		if (r == -1 || r >= sizeof buf)
+			return -1;
+
+		*o = string(buf);
+
+		return r;
+	}
+
+	string ConvertIntString(int x) {
+		string s;
+		int r = _dummy_sprintf(&s, "%d", x);
+		assert(r != -1);
+		return s;
+	}
 
 	oglplus::Mat4f DMatToOgl(const DMat &m) {
 		return oglplus::Mat4f(
@@ -96,26 +205,36 @@ namespace Cruft {
 		assert (glewInit() == GLEW_OK);
 		glGetError();
 
-		static ExBase *gEx = new ExType();
 		static bool gFailed = false;
+
+		static ExBase *gEx;
+		EX_OGLPLUS_ERROR_WRAP_START();
+		{
+			gEx = new ExType();
+		}
+		EX_OGLPLUS_ERROR_WRAP_MIDDLE();
+		{
+			throw;
+		}
+		EX_OGLPLUS_ERROR_WRAP_END();
 
 		/* Cannot pass exceptions through FreeGlut,
 		have to workaround with error flags and FreeGlut API / Option flags. */
 
 		auto dispfunc = []() {
-			try {
+			EX_OGLPLUS_ERROR_WRAP_START();
+			{
 				Ctx::ClearColor(0.2f, 0.2f, 0.2f, 0.0f);
 				Ctx::Clear().ColorBuffer().DepthBuffer();
 				gEx->Display();
 				glutSwapBuffers();
-			} catch(oglplus::Error &e) {
-				if (dynamic_cast<oglplus::CompileError *>(&e))
-					std::cerr << ((oglplus::CompileError &)e).Log();
-				OglGenErr(e);
-
+			}
+			EX_OGLPLUS_ERROR_WRAP_MIDDLE();
+			{
 				gFailed = true;
 				glutLeaveMainLoop();
 			}
+			EX_OGLPLUS_ERROR_WRAP_END();
 		};
 
 		glutDisplayFunc(dispfunc);
@@ -144,35 +263,50 @@ namespace Md {
 	};
 
 	Program * ShaderTexSimple() {
-		VertexShader vs;
-		FragmentShader fs;
-		Program *prog = new Program();
-		vs.Source(
-			"#version 420\n\
-			uniform mat4 ProjectionMatrix, CameraMatrix, ModelMatrix;\
-			in vec4 Position;\
-			in vec2 TexCoord;\
-			out vec2 vTexCoord;\
-			void main(void) {\
-			vTexCoord = TexCoord;\
-			gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * Position;\
-			}"
+		VertexShader vs; FragmentShader fs; Program *prog = new Program();
+
+		string defS("#version 420\n");
+		defS.append("#define MAX_BONES ");      defS.append(ConvertIntString(G_MAX_BONES_UNIFORM));     defS.append("\n");
+		defS.append("#define MAX_BONES_INFL "); defS.append(ConvertIntString(G_MAX_BONES_INFLUENCING)); defS.append("\n");
+
+		string vsSrc(defS);
+		vsSrc.append(
+			"uniform mat4 ProjectionMatrix, CameraMatrix, ModelMatrix;\n"
+			"in vec4  Position;\n"
+			"in vec2  TexCoord;\n"
+			"out vec2 vTexCoord;\n"
+			"\n"
+			"uniform mat4 MeshMat;\n"
+			"uniform mat4 BoneMat[64];\n"
+			"in ivec4 BoneId;\n"
+			"in  vec4 BoneWt;\n"
+			"\n"
+			"void main(void) {"
+			"  vTexCoord = TexCoord;\n"
+			""
+			"  vec4 blendPos = vec4(0,0,0,0);\n"
+			"  for (int i = 0;\n i < 4;\n ++i) {"
+			"    blendPos += BlendWt[i] * (BoneMat[BoneId[i]] * Position);\n"
+			"  }"
+			""
+			"  if (equal(BoneWt, vec4(0,0,0,0)))"
+			"    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * MeshMat * Position;\n"
+			"  else"
+			"    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * blendPos;\n"
+			"}"
 			);
-		fs.Source(
-			"#version 420\n\
-			uniform sampler2D TexUnit;\
-			in vec2 vTexCoord;\
-			out vec4 fragColor;\
-			void main(void) {\
-			vec4 t = texture(TexUnit, vTexCoord);\
-			fragColor = vec4(t.rgb, 1.0);\
-			}"
+		string fsSrc(defS);
+		fsSrc.append(
+			"uniform sampler2D TexUnit;"
+			"in vec2 vTexCoord;"
+			"out vec4 fragColor;"
+			"void main(void) {"
+			"  vec4 t = texture(TexUnit, vTexCoord);"
+			"  fragColor = vec4(t.rgb, 1.0);"
+			"}"
 			);
-		vs.Compile();
-		fs.Compile();
-		prog->AttachShader(vs);
-		prog->AttachShader(fs);
-		prog->Link();
+
+		vs.Source(vsSrc); fs.Source(fsSrc); vs.Compile(); fs.Compile(); prog->AttachShader(vs); prog->AttachShader(fs); prog->Link();
 		return prog;
 	}
 
