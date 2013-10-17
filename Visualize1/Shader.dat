@@ -1,0 +1,44 @@
+====== vsBone @@@@@@
+uniform mat4 ProjectionMatrix, CameraMatrix, ModelMatrix;
+in vec4  Position;
+in vec2  TexCoord;
+out vec2 vTexCoord;
+
+uniform mat4 MeshMat;
+uniform mat4 BoneMat[64];
+in ivec4 BoneId;
+in  vec4 BoneWt;
+
+float delta = 0.001;
+
+bool VecEq4(vec4 a, vec4 b) {
+    return distance(a, b) < delta;
+}
+
+void main(void) {
+    vTexCoord = TexCoord;
+
+    /*
+    vec4 blendPos = vec4(0,0,0,0);
+    for (int i = 0; i < 4; ++i) {
+        blendPos += BoneWt[i] * (BoneMat[BoneId[i]] * Position);
+    }
+
+    if (VecEq4(BoneWt, vec4(0,0,0,0)))
+        gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * MeshMat * Position;
+    else
+        gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * blendPos;
+      */  
+      
+    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * Position;
+}
+
+====== fsBone @@@@@@
+uniform sampler2D TexUnit;
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+void main(void) {
+    vec4 t = texture(TexUnit, vTexCoord);
+    fragColor = vec4(1.0, t.gb, 1.0);
+}
