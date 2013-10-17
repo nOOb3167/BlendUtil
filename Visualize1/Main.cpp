@@ -44,12 +44,34 @@
 	  }                                                    \
 	}
 
+#define EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(prog, name, vArray, nComponent, dType) \
+	{ \
+	if (IsAttribActive((prog), (name))) { \
+	(vArray)->Bind(oglplus::BufferOps::Target::Array); \
+	VertexAttribArray((prog), (name)).Setup((nComponent), oglplus::DataType:: ## dType).Enable(); \
+	} \
+	}
+
 using namespace oglplus;
 using namespace std;
 
 class Ctx : public oglplus::Context {};
 
+map<string, string> gShdString;
+
 namespace Cruft {
+
+	vector<GLuint> ExIntToGLuint(const vector<int> &a) {
+		vector<GLuint> v;
+		transform(a.begin(), a.end(), back_inserter(v), [](int i) { return i; });
+		return v;
+	}
+
+	vector<GLfloat> ExFloatToGLfloat(const vector<float> &a) {
+		vector<GLfloat> v;
+		transform(a.begin(), a.end(), back_inserter(v), [](float i) { return i; });
+		return v;
+	}
 
 	string StrTrim(const string &s) {
 		const char *str = s.c_str();
@@ -97,7 +119,7 @@ namespace Cruft {
 			string shdNameSpan(pS.OptRawSpanTo(pE));
 			assert(shdNameSpan.size() >= markE.size() && equal(markE.begin(), markE.end(), shdNameSpan.rbegin()));
 			string shdName(StrTrim(shdNameSpan.substr(0, shdNameSpan.size() - markE.size())));
-			
+
 			P pContentS(pE);
 			P pContentE(pContentS);
 			bool afterNextDelContent = pContentE.OptAfterNextDelDeep(markS);
@@ -262,52 +284,33 @@ namespace Md {
 		MdT(const Mat4f &p, const Mat4f &c, const Mat4f &m) : ProjectionMatrix(p), CameraMatrix(c), ModelMatrix(m) {}
 	};
 
-	Program * ShaderTexSimple() {
-		VertexShader vs; FragmentShader fs; Program *prog = new Program();
+	Program * ProgramFromShaderMap(const map<string, string> &mapShdString, const string &root) {
+		VertexShader vs;
+		FragmentShader fs;
+		Program *prog = new Program();
 
 		string defS("#version 420\n");
 		defS.append("#define MAX_BONES ");      defS.append(ConvertIntString(G_MAX_BONES_UNIFORM));     defS.append("\n");
 		defS.append("#define MAX_BONES_INFL "); defS.append(ConvertIntString(G_MAX_BONES_INFLUENCING)); defS.append("\n");
 
 		string vsSrc(defS);
-		vsSrc.append(
-			"uniform mat4 ProjectionMatrix, CameraMatrix, ModelMatrix;\n"
-			"in vec4  Position;\n"
-			"in vec2  TexCoord;\n"
-			"out vec2 vTexCoord;\n"
-			"\n"
-			"uniform mat4 MeshMat;\n"
-			"uniform mat4 BoneMat[64];\n"
-			"in ivec4 BoneId;\n"
-			"in  vec4 BoneWt;\n"
-			"\n"
-			"void main(void) {"
-			"  vTexCoord = TexCoord;\n"
-			""
-			"  vec4 blendPos = vec4(0,0,0,0);\n"
-			"  for (int i = 0;\n i < 4;\n ++i) {"
-			"    blendPos += BlendWt[i] * (BoneMat[BoneId[i]] * Position);\n"
-			"  }"
-			""
-			"  if (equal(BoneWt, vec4(0,0,0,0)))"
-			"    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * MeshMat * Position;\n"
-			"  else"
-			"    gl_Position = ProjectionMatrix * CameraMatrix * ModelMatrix * blendPos;\n"
-			"}"
-			);
+		vsSrc.append(mapShdString.at(string("vs").append(root)));
 		string fsSrc(defS);
-		fsSrc.append(
-			"uniform sampler2D TexUnit;"
-			"in vec2 vTexCoord;"
-			"out vec4 fragColor;"
-			"void main(void) {"
-			"  vec4 t = texture(TexUnit, vTexCoord);"
-			"  fragColor = vec4(t.rgb, 1.0);"
-			"}"
-			);
+		fsSrc.append(mapShdString.at(string("fs").append(root)));
 
-		vs.Source(vsSrc); fs.Source(fsSrc); vs.Compile(); fs.Compile(); prog->AttachShader(vs); prog->AttachShader(fs); prog->Link();
+		vs.Source(vsSrc);
+		fs.Source(fsSrc);
+		vs.Compile();
+		fs.Compile();
+		prog->AttachShader(vs);
+		prog->AttachShader(fs);
+		prog->Link();
+
 		return prog;
+	}
+
+	Program * ShaderTexSimple() {
+		return ProgramFromShaderMap(gShdString, "Bone");
 	}
 
 	class ShdTexSimple : public Shd {
@@ -320,13 +323,26 @@ namespace Md {
 			shared_ptr<Buffer> id;
 			shared_ptr<Buffer> vt;
 
+			shared_ptr<Buffer> meshVertId;
+			shared_ptr<Buffer> meshVertWt;
+
 			MdD(const SectionDataEx &sde, int meshId) :
 				triCnt(sde.meshIndex[meshId].size() / 3),
 				id(new Buffer()),
-				vt(new Buffer())
+				vt(new Buffer()),
+				meshVertId(new Buffer()),
+				meshVertWt(new Buffer())
 			{
 				assert(sde.meshIndex[meshId].size() % 3 == 0);
 
+				/* Mesh */
+
+				//id->Bind(oglplus::BufferOps::Target::Array);
+				//Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshIndex[meshId]));
+
+				//vt->Bind(oglplus::BufferOps::Target::Array);
+				//Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVert[meshId]));
+				
 				{
 					id->Bind(oglplus::BufferOps::Target::Array);
 					vector<GLuint> v; transform(sde.meshIndex[meshId].begin(), sde.meshIndex[meshId].end(), back_inserter(v), [](int i) { return i; });
@@ -338,6 +354,14 @@ namespace Md {
 					vector<GLfloat> v; transform(sde.meshVert[meshId].begin(), sde.meshVert[meshId].end(), back_inserter(v), [](float i) { return i; });
 					Buffer::Data(oglplus::BufferOps::Target::Array, v);
 				}
+
+				/* Bone */
+
+				//meshVertId->Bind(oglplus::BufferOps::Target::Array);
+				//Buffer::Data(oglplus::BufferOps::Target::Array, ExIntToGLuint(sde.meshVertId[meshId]));
+
+				//meshVertWt->Bind(oglplus::BufferOps::Target::Array);
+				//Buffer::Data(oglplus::BufferOps::Target::Array, ExFloatToGLfloat(sde.meshVertWt[meshId]));
 			}
 		};
 
@@ -356,16 +380,26 @@ namespace Md {
 
 			va->Bind();
 
+			/* Mesh */
+
 			md.id->Bind(oglplus::BufferOps::Target::ElementArray);
 
 			md.vt->Bind(oglplus::BufferOps::Target::Array);
 			(*prog|"Position").Setup(3, oglplus::DataType::Float).Enable();
+
+			/* Bone */
+
+			//EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneId", md.meshVertId, 4, UnsignedInt);
+
+			//EX_OGLPLUS_ATTRIB_ARRAY_ACTIVE(*prog, "BoneWt", md.meshVertWt, 4, Float);
 
 			/* MdT */
 
 			ProgramUniform<Mat4f>(*prog, "ProjectionMatrix") = mt.ProjectionMatrix;
 			ProgramUniform<Mat4f>(*prog, "CameraMatrix") = mt.CameraMatrix;
 			ProgramUniform<Mat4f>(*prog, "ModelMatrix") = mt.ModelMatrix;
+
+			OptionalProgramUniform<Mat4f>(*prog, "MeshMat") = ModelMatrixf();
 
 			Validate();
 		}
@@ -419,12 +453,11 @@ namespace Md {
 			mdt0 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
-				//DMatToOgl(nodeWorldMatrix[0])));
-				DMatToOgl(nm0)));
-			mdt1 = shared_ptr<Md::MdT>(new Md::MdT(
-				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
-				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
-				DMatToOgl(nodeWorldMatrix[1])));
+				ModelMatrixf()));
+			//mdt1 = shared_ptr<Md::MdT>(new Md::MdT(
+			//	CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
+			//	CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
+			//	DMatToOgl(nodeWorldMatrix[1])));
 
 			shd.Prime(*mdt0, *mdd0);
 			shd.Draw();
@@ -441,6 +474,8 @@ namespace Md {
 int main(int argc, char **argv) {
 	using namespace Cruft;
 	using namespace Md;
+
+	gShdString = ParseShdFromFile("../Visualize1/Shader.dat");
 
 	RunExample<Ex1>(argc, argv);
 
