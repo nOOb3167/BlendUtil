@@ -173,6 +173,14 @@ namespace Cruft {
 			DMAT_ELT(m, 3, 0), DMAT_ELT(m, 3, 1), DMAT_ELT(m, 3, 2), DMAT_ELT(m, 3, 3));
 	}
 
+	DMat DMatFromOgl(const oglplus::Mat4f &m) {
+		return DMat::MakeFromVec(
+			m.At(0, 0), m.At(0, 1), m.At(0, 2), m.At(0, 3),
+			m.At(1, 0), m.At(1, 1), m.At(1, 2), m.At(1, 3),
+			m.At(2, 0), m.At(2, 1), m.At(2, 2), m.At(2, 3),
+			m.At(3, 0), m.At(3, 1), m.At(3, 2), m.At(3, 3));
+	}
+
 	struct ExBase {
 		int tick;
 		ExBase() : tick(-1) {}
