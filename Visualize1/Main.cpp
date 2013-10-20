@@ -375,7 +375,7 @@ namespace Md {
 			va(new VertexArray()),
 			triCnt(0) {}
 
-		void Prime(const MdT &mt, const MdD &md, const vector<DMat> &boneWorldMatrix) {
+		void Prime(const MdT &mt, const MdD &md, const DMat &meshMat, const vector<DMat> &boneWorldMatrix) {
 			triCnt = md.triCnt;
 
 			va->Bind();
@@ -400,7 +400,7 @@ namespace Md {
 			ProgramUniform<Mat4f>(*prog, "ModelMatrix") = mt.ModelMatrix;
 
 			/* FIXME: TODO: Identity... */
-			OptionalProgramUniform<Mat4f>(*prog, "MeshMat") = ModelMatrixf();
+			OptionalProgramUniform<Mat4f>(*prog, "MeshMat") = DMatToOgl(meshMat);
 
 			{
 				vector<oglplus::Mat4f> v;
@@ -435,7 +435,7 @@ namespace Md {
 		Md::ShdTexSimple shd;
 		shared_ptr<SectionDataEx> sde;
 		shared_ptr<Md::MdT> mdt0, mdt1;
-		shared_ptr<Md::ShdTexSimple::MdD> mdd0, mdd1;
+		vector<shared_ptr<Md::ShdTexSimple::MdD> > mdd;
 
 		Ex1() {
 			sde = shared_ptr<SectionDataEx>(BlendUtilMakeSectionDataEx("../tmpdata.dat"));
@@ -449,35 +449,41 @@ namespace Md {
 			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
 			MatrixMeshToBone(sde->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
 
-			assert(sde->meshName.size() == 2);
-			mdd0 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 0, boneMeshToBoneMatrix));
-			mdd1 = shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, 1, boneMeshToBoneMatrix));
+			//assert(sde->meshName.size() == 2);
+			for (int i = 0; i < sde->meshName.size(); i++)
+				mdd.push_back(shared_ptr<ShdTexSimple::MdD>(new ShdTexSimple::MdD(*sde, i, boneMeshToBoneMatrix)));
 		}
 
 		void Display() {
 			ExBase::Display();
 
+			vector<DMat> nodeWorldIdentityRoot(sde->nodeName.size(), DMat::MakeIdentity());
+			vector<DMat> nodeWorldMatrix(sde->nodeName.size());
 			vector<DMat> boneWorldMatrix(sde->boneName.size());
+			MultiRootMatrixAccumulateWorld(sde->nodeMatrix, sde->nodeChild, sde->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
 			MultiRootMatrixAccumulateWorld(sde->boneMatrix, sde->boneChild, sde->boneParent, sde->meshRootMatrix, &boneWorldMatrix);
 
-			//DMat nm0 = DMat::Multiply(boneWorldMatrix[0], boneMeshToBoneMatrix[0]);
+			/* Transform equal to BoneZero in blendOneBone.blend at the current time
+			ModelMatrixf mm;
+			mm = Multiplied(ModelMatrixf::RotationX(Degrees(90)), mm);
+			mm = Multiplied(ModelMatrixf::TranslationX(3.0), mm);
+			boneWorldMatrix.at(0) = DMatFromOgl(mm);
+			*/
+
+			ModelMatrixf mm;
+			mm = Multiplied(ModelMatrixf::RotationX(Degrees(-45)), mm);
+			boneWorldMatrix.at(1) = DMatFromOgl(mm);
 
 			mdt0 = shared_ptr<Md::MdT>(new Md::MdT(
 				CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
 				CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
 				ModelMatrixf()));
-			//mdt1 = shared_ptr<Md::MdT>(new Md::MdT(
-			//	CamMatrixf::PerspectiveX(Degrees(90), GLfloat(G_WIN_W)/G_WIN_H, 1, 30),
-			//	CamMatrixf::Orbiting(oglplus::Vec3f(0, 0, 0), 3, Degrees(float(tick * 5)), Degrees(15)),
-			//	DMatToOgl(nodeWorldMatrix[1])));
 
-			shd.Prime(*mdt0, *mdd0, boneWorldMatrix);
-			shd.Draw();
-			shd.UnPrime();
-
-			//shd.Prime(*mdt1, *mdd1);
-			//shd.Draw();
-			//shd.UnPrime();
+			for (int i = 0; i < sde->meshName.size(); i++) {
+				shd.Prime(*mdt0, *mdd[i], nodeWorldMatrix[0], boneWorldMatrix);
+				shd.Draw();
+				shd.UnPrime();
+			}
 		}
 	};
 
