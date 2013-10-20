@@ -222,7 +222,8 @@ class BId:
     @classmethod
     def BidGetIdParent(klass, lBid):
         lBone = [b for bid in lBid for b in bid.lBone]
-        return ListGetIdParentBlenderSpecialCheck(lBone, lambda x: True if x.parent == None or x.parent_type == 'BONE' else False)
+        # Had the "or x.parent_type == 'BONE'" check, but seems Bones do not have parent_type (Objects do)
+        return ListGetIdParentBlenderSpecialCheck(lBone, lambda x: True if x.parent == None or True else False)
 
 def GetWeights(bid):
     llIF = [[] for x in range(len(bid.lBone))]
@@ -431,13 +432,7 @@ def BlendRun():
     nodeName = [m.bid.oMesh.name for m in allM]
     nodeParent = BaseMesh.NodeGetIdParent(allM)
     nodeMatrix = [m.bid.oMesh.matrix_local for m in allM]
-        
-    #FIXME: Instead:
-    #       Export no hierarchy. World matrices and null parents.
-    #nodeName = [m.bid.oMesh.name for m in am]
-    #nodeParent = [-1 for m in am]
-    #nodeMatrix = [m.bid.oMesh.matrix_world for m in am]
-    
+            
     #FIXME: Every node is a mesh node.
     #       Now traversing MMesh and AMesh - Probably need to add
     #       traversal of regular Blender Objects besides meshes
@@ -445,6 +440,11 @@ def BlendRun():
     
     boneName   = [i.name for m in am for i in m.bid.lBone]
     boneParent = BId.BidGetIdParent([m.bid for m in am])
+    #FIXME/NOTE: Bone.matrix_local is in Armature space not local relative to parent bone
+    #            Notice meshRootMatrix is filled with GetMeshArmature(m.bid.oMesh).matrix_world
+    #            A Bone.matrix_local and an Armature.matrix_world can be combined for form Bone world space
+    #            Since Bone.matrix_local is relative to same space for every Bone (The Armature space),
+    #            can get true local by: (BoneParent.matrix_local)^-1 * BoneChild.matrix_local
     boneMatrix = [i.matrix_local for m in am for i in m.bid.lBone]
     
     #FIXME: Mesh name just using Node names
