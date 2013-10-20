@@ -796,7 +796,9 @@ public:
 		vector<int> boneCandidate;
 
 		for (int i = 0; i < boneWeight.size(); i++)
-			if (boneWeight[i][curVisited[i]].first == state)
+			/* FIXME: boneWeight[i].size() check specifically workarounds the case of a Bone having no weights.
+					  In this case curVisited[i] is still zero, but needs to be handled specifically as boneWeight[i][0] can not be visited. */
+			if (boneWeight[i].size() && boneWeight[i][curVisited[i]].first == state)
 				boneCandidate.push_back(i);
 
 		/* Sort by Descending weight */
