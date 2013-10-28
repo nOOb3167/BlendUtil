@@ -254,8 +254,8 @@ def GetWeights(bid):
 
 def GetWeightsEx(oMesh, lBone):
     """ @lBone: Bone list of Mesh modifiering Armature.
-        @Return: [#BoneN, ...]
-                 #BoneN: [[Vertex index, Weight of Vertex index of BoneN], ...]
+        @Return: [#VertexN, ...]
+                    #VertexN: [[lBone-Local Bone index, Weight of VertexN], ...]
         = Relevant Blender data structures =
             == Conceptual workflow and common sense ==
                 Blender UI vertex_group editing workflow:
@@ -275,6 +275,13 @@ def GetWeightsEx(oMesh, lBone):
                     in ivec4 BoneId
                     in  vec4 BoneWt
                 Bone indices and weights are passed per-vertex.
+        = Matching =
+            bone.name              <-> vertex_groups[N].name     # By string
+            vertex_groups[N].index <-> vertex[N].groups[M].group # By ID
+            
+            The above paths may be traversed forward/backward to obtain:
+                Bone   -> list of influenced vertices with their weights
+                vertex -> list of influencing Bones
         = API Layout =
             oMesh.vertex_groups[N].(name|index)
                 Vertex group name  is to be matched with Bone names
@@ -283,7 +290,11 @@ def GetWeightsEx(oMesh, lBone):
             oMesh.data.vertices[N].groups[M].(group|weight)
                 group is to be matched with oMesh.vertex_groups[N].index                
     """
-    llIF = [[] for x in range(len(lBone))]
+    llIF = [[] for x in range(len(oMesh.data.vertices))]
+    
+    for v in oMesh.data.vertices:
+        for g in v.groups:
+            inflBoneId = mapVGIdxBoneId[g.group]
     
     mapVGIdxBoneId = MakeMapVGIdxBoneId()
 
@@ -608,6 +619,22 @@ def Br2():
     boneParent = bniBone.GetIdParent()
     #NOTE: Bone.matrix_local is in Armature space
     boneMatrix = [bni.o.matrix_local for bni in bniBone.byBoneId]
+    
+    # FIXME: Bone global/local naming collisions
+    """
+    mesh0 vertex_groups Bone0 Bone1
+    arma0 influencing mesh0 bones Bone0
+    arma1 influencing mesh1 bones Bone1
+    This must not result result in Bone1 influencing mesh0
+    Bone names should not be global, they are naturally Armature-Local (Selection is Armature.Bone)
+    
+    Mesh with multiple influencing armatures:
+        Bone names required to be unique.
+        Blender not equipped with a disambiguation mechanism (vertex_groups[N].name is a bare Bone name - No Armature part)
+    Mesh with unrelated (non-influencing) armatures existing:
+        Bone names allowed to clash.
+        Implicit knowledge of Armature (vertex_groups[N].name is assumed to be one of the influencing Armatures)
+    """
     
     meshBoneCount =
         lReduce(lCount(sorted(bniBone.byBoneId,
