@@ -14,6 +14,7 @@ except ImportError:
     pass
 
 from struct import pack as sPack, unpack as sUnpack, error as sError
+from collections import namedtuple
 
 class P:
     def __init__(self):
@@ -160,12 +161,6 @@ def IsBoneHierarchySingleRoot(lBone):
             return False
     return True
 
-def GetBoneVertexGroupIdx(oMesh, bone):
-    for g in oMesh.vertex_groups:
-        if g.name == bone.name:
-            return g.index
-    return None
-
 def ListGetMapId(l):
     mapIdElt = dict(enumerate(l))
     mapEltId = dict([(b, a) for a, b in mapIdElt.items()])
@@ -195,7 +190,25 @@ def ListGetIdParentBlenderSpecialCheck(lObject, fChecker):
             lIdParent.append(mapEltId[o.parent])
             
     return lIdParent
-    
+
+def GetBoneVertexGroupIdx(oMesh, bone):
+    for g in oMesh.vertex_groups:
+        if g.name == bone.name:
+            return g.index
+    return None
+
+def MakeMapVGIdxBoneId(oMesh, lBone):
+    """ @lBone: Bone list of Mesh modifiering Armature.
+        @Return: { Blender internal index of vertex_group : lBone-Local ID }
+                 No key   for vertex_group not matched by any Bone
+                 No value for bone         not matched by any vertex_group
+    """
+    lVGIdx = [GetBoneVertexGroupIdx(oMesh, b) for b in lBone]
+    assert lUniqP(lFilter(lVGIdx, f=lambda x: x is not None)
+    mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
+    if None in mapVGIdxBoneId: del mapVGIdxBoneId[None]
+    return mapVGIdxBoneId
+
 class BId:
     def __init__(self, oMesh, lBone, mapIdBone, mapBoneId, lVGIdx, mapVGIdxBoneId):
         self.oMesh = oMesh
@@ -238,6 +251,54 @@ def GetWeights(bid):
             llIF[inflBoneId].append([v.index, g.weight])
 
     return llIF
+
+def GetWeightsEx(oMesh, lBone):
+    """ @lBone: Bone list of Mesh modifiering Armature.
+        @Return: [#BoneN, ...]
+                 #BoneN: [[Vertex index, Weight of Vertex index of BoneN], ...]
+        = Relevant Blender data structures =
+            == Conceptual workflow and common sense ==
+                Blender UI vertex_group editing workflow:
+                    - Select vertex_group to work on
+                    - Modify vertex weights in Weight Paint mode
+                You would therefore expect oMesh.vertex_groups[N] objects to store
+                a list of vertices and their assigned weights: [(VertexN, Weight), ...].
+            == Rant ==
+                However, contrasting the usual Blender convention where the UI team is a pile of ferrets with rabbies
+                and the coders try there best to offset the handicap, their roles seem to have formerly reversed.
+                
+                Data rightfully beloning in oMesh.vertex_groups[N] instead has to be recovered out of oMesh.data.vertices[N].
+                Storage is:             vertex       -> list of influencing vertex_groups
+                Instead of the natural: vertex_group -> list of influenced vertices            
+            == Rationale ==
+                The reason why this reversal makes sense is the data format expected by a hardware skinning shader:
+                    in ivec4 BoneId
+                    in  vec4 BoneWt
+                Bone indices and weights are passed per-vertex.
+        = API Layout =
+            oMesh.vertex_groups[N].(name|index)
+                Vertex group name  is to be matched with Bone names
+                Vertex group index is to be matched with oMesh.data.vertices[N].groups[M].group            
+
+            oMesh.data.vertices[N].groups[M].(group|weight)
+                group is to be matched with oMesh.vertex_groups[N].index                
+    """
+    llIF = [[] for x in range(len(lBone))]
+    
+    mapVGIdxBoneId = MakeMapVGIdxBoneId()
+
+    # Check sequentialness of dMesh.vertices[n].index
+    assert all(lMap(range(len(dMesh.vertices)),
+                    [v.index for v in dMesh.vertices]
+                    f=lambda x: x[0] == x[1]))
+    
+    for v in oMesh.data.vertices:
+        for g in v.groups:
+            inflBoneId = mapVGIdxBoneId[g.group]
+            if inflBoneId:
+                llIF[inflBoneId].append([v.index, g.weight])
+    
+    assert 0
 
 def GetVerts(bid): return dMeshGetVerts(bid.oMesh.data)
 def dMeshGetVerts(dMesh):
@@ -408,9 +469,158 @@ def pm(m):
 def lConcat(la, lb):
     lc = la[:]; lc.extend(lb); return lc
 
+def lFlatten(ll):
+    return [e for l in ll for e in l]
+
 def BytesFromStr(s):
     return bytes(s, encoding='UTF-8')
+
+def lUniq(l, **kwargs):
+    f = 'f' in kwargs and kwargs[f] or lambda x: x
+    
+    r = []
+    seen = set()
+    for x in l:
+        tmp = f(x)
+        if tmp not in seen:
+            r.append(x)
+        seen.add(tmp)
+    return r
+
+def lUniqP(l, **kwargs):
+    return len(l) == len(lUniq(l), **kwargs)
+
+def lMap(*args, **kwargs):
+    assert 'f' in kwargs
+    return list(map(kwargs[f], *args))
+
+def lReduce(*args, **kwargs):
+    assert 'f' in kwargs
+    def fuckoff():
+        global reduce
+        try:
+            from functools import reduce as fuckoff
+            return fuckoff
+        except ImportError:
+            return reduce
+    return fuckoff()(f, *args)
+
+def lCountOne(l, e, **kwargs):
+    f = 'f' in kwargs and kwargs[f] or lambda x: x
+    
+    count = 0
+    for x in enumerate(l):
+        if f(x) == e:
+            count += 1
+    return count
+
+def lCount(l, **kwargs):
+    f = 'f' in kwargs and kwargs[f] or lambda x: x
+
+    seen = {}
+    fs = [f(x) for x in l]
+    for i, x in enumerate(l):
+        if x not in seen:
+            seen[fs[i]] = 0
+        seen[fs[i]] += 1
+    return [seen[fs[i]] for i in range(l)]
+
+def lAppend(l, e):
+    l2 = l[:]
+    return lAppendI(l2, e)
+
+def lAppendI(l, e):
+    l.append(e)
+    return l
+
+def lFilter(l, **kwargs):
+    assert 'f' in kwargs
+    return filter(kwargs[f], l)
+
+def SceneMeshSelectAll():
+    return [x for x in bpy.context.scene.objects if x.type == 'MESH']
+
+def MeshArmatureAll(oMesh):
+    return [m.object in oMesh.modifiers if m.type == 'ARMATURE']
+
+OniDat = namedtuple('OniDat', ['o', 'n', 'i'])
+BniDat = namedtuple('BniDat', ['a', 'b', 'n', 'i'])
+
+class Oni:
+    def __init__(self, lOniDatUnsorted):
+        lOniDat      = sorted(lOniDatSorted, key=lambda x: x.i)
+        self.lOniDat = lOniDat
+        self.byId    = lOniDat
+        self.byName  = {t.n : t for t in lOniDat}
+        self.byObj   = {t.o : t for t in lOniDat}
+
+    @classmethod
+    def FromObject(klass, lO):
+        return Oni([lOniDat(o, o.name, i) for i, o in enumerate(lO)])
         
+    def GetIdParent(self):
+        def fOParentIndex(t):
+            assert t.o.parent == None or t.o.parent in self.byBoneObj
+            return t.o.parent is None and -1 or self.byObj[t.o.parent].i
+        return [fOParentIndex(t) for t in self.lOniDat]
+
+class Bni:
+    def __init__(self, lBoneOniDatUnsorted, lArmOniDatUnsorted):
+        lBoneOniDat = sorted(lBoneOniDatSorted, key=lambda x: x.i)
+        lArmOniDat = sorted(lArmOniDatSorted, key=lambda x: x.i)
+        self.lBoneOniDat = lBoneOniDat
+        self.lArmOniDat  = lArmOniDat
+        self.byBoneId    = lBoneOniDat
+        self.byArmId     = lArmOniDat
+        self.byBoneObj   = {t.o : t for t in lBoneOniDat}
+        
+    @classmethod
+    def FromOniArm(self, lOniArm):
+        lBone       = lFlatten([oni.o.data.bones              for oni in lOniArm])
+        lBoneArm    = lFlatten([[oni.o]*len(oni.o.data.bones) for oni in lOniArm])
+        lBoneOniDat = [BniDat(a, b, b.name, i) for i, (a, b) in enumerate(zip(lBoneArm, lBone)]
+        lArmOniDat  = [x for x in lOniArm.lOniDat]
+        return Bni(lBoneOniDat, lOniArm)
+    
+    def GetIdParent(self):
+        def fOParentIndex(t):
+            assert t.o.parent == None or t.o.parent in self.byBoneObj
+            return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
+        return [fOParentIndex(t) for t in self.lBoneOniDat]
+
+def Br2():
+    assert BlendMatCheck()
+
+    oMesh = SceneMeshSelectAll()
+    oArm = lFlatten([MeshArmatureAll(x) for x in oMesh])
+    assert lUniqP(oMesh, lambda x: x.name)
+    assert lUniqP(oArm, lambda x: x.name)
+    
+    oniMesh = Oni.FromObject(oMesh)
+    oniArm  = Oni.FromObject(oArmAll)
+    bniBone = Bni.FromOniArm(oniArm)
+    
+    meshName   = [m.bid.oMesh.name for m in oMesh]
+    meshParent = oniMesh.GetIdParent()
+    meshMatrix = [m.o.matrix_local for m in oniMesh.lOniDat]
+    
+    boneName   = [bni.n for bni in bniBone.byBoneId]
+    boneParent = bniBone.GetIdParent()
+    #NOTE: Bone.matrix_local is in Armature space
+    boneMatrix = [bni.o.matrix_local for bni in bniBone.byBoneId]
+    
+    meshBoneCount =
+        lReduce(lCount(sorted(bniBone.byBoneId,
+                              key=lambda bni: bni.a),
+                       f=lambda bni: bni.a)
+                {'lst': [], 'acc': 0}
+                f=lambda x,y: {'lst': lAppend(x.lst, x.acc), 'acc': x.acc + y})
+        .lst
+        
+    meshVert  = [dMeshGetVerts(m.data)   for m in oMesh]
+    meshIndex = [dMeshGetIndices(m.data) for m in oMesh]
+    meshBoneWeight = ([m.wts for m in am],            [[]    for m in mm])
+    
 def BlendRun():
     assert BlendMatCheck()
 
