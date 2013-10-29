@@ -487,7 +487,7 @@ def BytesFromStr(s):
     return bytes(s, encoding='UTF-8')
 
 def lUniq(l, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or lambda x: x
+    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
     
     r = []
     seen = set()
@@ -499,7 +499,7 @@ def lUniq(l, **kwargs):
     return r
 
 def lUniqP(l, **kwargs):
-    return len(l) == len(lUniq(l), **kwargs)
+    return len(l) == len(lUniq(l, **kwargs))
 
 def lMap(*args, **kwargs):
     assert 'f' in kwargs
@@ -517,7 +517,7 @@ def lReduce(*args, **kwargs):
     return fuckoff()(f, *args)
 
 def lCountOne(l, e, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or lambda x: x
+    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
     
     count = 0
     for x in enumerate(l):
@@ -526,7 +526,7 @@ def lCountOne(l, e, **kwargs):
     return count
 
 def lCount(l, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or lambda x: x
+    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
 
     seen = {}
     fs = [f(x) for x in l]
@@ -544,16 +544,42 @@ def lAppendI(l, e):
     l.append(e)
     return l
 
+def lAppendMultiI(lL, lV):
+    for x in zip(lL, lV):
+        lAppendI(x[0], x[1])
+
 def lFilter(l, **kwargs):
     assert 'f' in kwargs
     return filter(kwargs[f], l)
+
+def lIndexNestedN(lplus, n):
+    assert n
+    nItem = []
+    trail = []
+    def help(node):
+        if len(trail) == n:
+            nItem.append(trail[:])
+            return
+        for i, l in enumerate(node):
+            trail.append(i)
+            help(l)
+            trail.pop()
+    help(lplus)
+    return nItem
+
+def lEmptyN(n):
+    return [None for x in range(n))]
+
+def dReversed(d):
+    assert lUniqP(d.values())
+    return {v : k for k, v in d.items()}
 
 def SceneMeshSelectAll():
     return [x for x in bpy.context.scene.objects if x.type == 'MESH']
 
 def MeshArmatureAll(oMesh):
     return [m.object in oMesh.modifiers if m.type == 'ARMATURE']
-
+    
 OniDat = namedtuple('OniDat', ['o', 'n', 'i'])
 BniDat = namedtuple('BniDat', ['a', 'b', 'n', 'i'])
 
@@ -599,18 +625,51 @@ class Bni:
             return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
         return [fOParentIndex(t) for t in self.lBoneOniDat]
 
+class Data:
+    def __init__(self):
+        lists = 'meshObj meshName armObj armName boneObj boneName boneArm'.split()
+        for l in lists:
+            setattr(self, l, [])
+
+def MeshMultiSyncIdArmature(oMesh):
+    armId = {}
+    curId = 0
+    for m in oMesh:
+        for a in MeshArmatureAll(m)
+            if a not in armId:
+                armId[a] = curId
+                curId += 1
+    return armId
+
+def MeshMultiSyncGatherArmature(oMesh):
+    armId = MeshMultiSyncIdArmature(oMesh)
+    r = []
+    for m in oMesh:
+        r.append([])
+        for a in MeshArmatureAll(m)
+            r[-1].append(armId[a])
+    return r
+
 def Br2():
     assert BlendMatCheck()
 
     oMesh = SceneMeshSelectAll()
-    oArm = lFlatten([MeshArmatureAll(x) for x in oMesh])
-    assert lUniqP(oMesh, lambda x: x.name)
-    assert lUniqP(oArm, lambda x: x.name)
+    oMeshArm = [MeshArmatureAll(x) for x in oMesh]
+    oArmAll  = lFlatten(oMeshArm)
+    assert lUniqP(oMesh, f=lambda x: x.name)
+    assert lUniqP(oArmAll, f=lambda x: x.name)
     
     oniMesh = Oni.FromObject(oMesh)
     oniArm  = Oni.FromObject(oArmAll)
     bniBone = Bni.FromOniArm(oniArm)
     
+    d = Data()
+    
+    dArmId = MeshMultiSyncIdArmature(oMesh)
+    dIdArm = dReversed(armId)
+    
+    idMeshArm = MeshMultiSyncGatherArmature(oMesh)
+        
     meshName   = [m.bid.oMesh.name for m in oMesh]
     meshParent = oniMesh.GetIdParent()
     meshMatrix = [m.o.matrix_local for m in oniMesh.lOniDat]
