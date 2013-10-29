@@ -5,6 +5,10 @@
 
 # Bones in blender are y-forward (From head to tail as in 3D display window)
 
+from pprint import pprint as pp
+def pall(x):
+    from pprint import pprint
+    pprint(x.__dict__)
 def dbg():
     import pdb; pdb.set_trace()
 
@@ -204,7 +208,7 @@ def MakeMapVGIdxBoneId(oMesh, lBone):
                  No value for bone         not matched by any vertex_group
     """
     lVGIdx = [GetBoneVertexGroupIdx(oMesh, b) for b in lBone]
-    assert lUniqP(lFilter(lVGIdx, f=lambda x: x is not None)
+    assert lUniqP(lFilter(lVGIdx, f=lambda x: x is not None))
     mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
     if None in mapVGIdxBoneId: del mapVGIdxBoneId[None]
     return mapVGIdxBoneId
@@ -299,9 +303,7 @@ def GetWeightsEx(oMesh, lBone):
     mapVGIdxBoneId = MakeMapVGIdxBoneId()
 
     # Check sequentialness of dMesh.vertices[n].index
-    assert all(lMap(range(len(dMesh.vertices)),
-                    [v.index for v in dMesh.vertices]
-                    f=lambda x: x[0] == x[1]))
+    assert lSequentialEquiv([v.index for v in dMesh.vertices])
     
     for v in oMesh.data.vertices:
         for g in v.groups:
@@ -487,7 +489,7 @@ def BytesFromStr(s):
     return bytes(s, encoding='UTF-8')
 
 def lUniq(l, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
+    f = 'f' in kwargs and kwargs['f'] or (lambda x: x)
     
     r = []
     seen = set()
@@ -503,7 +505,7 @@ def lUniqP(l, **kwargs):
 
 def lMap(*args, **kwargs):
     assert 'f' in kwargs
-    return list(map(kwargs[f], *args))
+    return list(map(kwargs['f'], *args))
 
 def lReduce(*args, **kwargs):
     assert 'f' in kwargs
@@ -517,7 +519,7 @@ def lReduce(*args, **kwargs):
     return fuckoff()(f, *args)
 
 def lCountOne(l, e, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
+    f = 'f' in kwargs and kwargs['f'] or (lambda x: x)
     
     count = 0
     for x in enumerate(l):
@@ -526,7 +528,7 @@ def lCountOne(l, e, **kwargs):
     return count
 
 def lCount(l, **kwargs):
-    f = 'f' in kwargs and kwargs[f] or (lambda x: x)
+    f = 'f' in kwargs and kwargs['f'] or (lambda x: x)
 
     seen = {}
     fs = [f(x) for x in l]
@@ -550,7 +552,7 @@ def lAppendMultiI(lL, lV):
 
 def lFilter(l, **kwargs):
     assert 'f' in kwargs
-    return filter(kwargs[f], l)
+    return filter(kwargs['f'], l)
 
 def lIndexNestedN(lplus, n):
     assert n
@@ -568,7 +570,15 @@ def lIndexNestedN(lplus, n):
     return nItem
 
 def lEmptyN(n):
-    return [None for x in range(n))]
+    return [None for x in range(n)]
+
+def lSequentialEquiv(l):
+    return all(lMap(zip(range(len(l)),
+                        l),
+                    f=lambda x: x[0] == x[1]))
+
+def lSequentialContain(l):
+    return lSequentialEquiv(l.sorted())
 
 def dReversed(d):
     assert lUniqP(d.values())
@@ -578,14 +588,14 @@ def SceneMeshSelectAll():
     return [x for x in bpy.context.scene.objects if x.type == 'MESH']
 
 def MeshArmatureAll(oMesh):
-    return [m.object in oMesh.modifiers if m.type == 'ARMATURE']
+    return [m.object for m in oMesh.modifiers if m.type == 'ARMATURE']
     
 OniDat = namedtuple('OniDat', ['o', 'n', 'i'])
 BniDat = namedtuple('BniDat', ['a', 'b', 'n', 'i'])
 
 class Oni:
     def __init__(self, lOniDatUnsorted):
-        lOniDat      = sorted(lOniDatSorted, key=lambda x: x.i)
+        lOniDat      = sorted(lOniDatUnsorted, key=lambda x: x.i)
         self.lOniDat = lOniDat
         self.byId    = lOniDat
         self.byName  = {t.n : t for t in lOniDat}
@@ -593,7 +603,7 @@ class Oni:
 
     @classmethod
     def FromObject(klass, lO):
-        return Oni([lOniDat(o, o.name, i) for i, o in enumerate(lO)])
+        return Oni([OniDat(o, o.name, i) for i, o in enumerate(lO)])
         
     def GetIdParent(self):
         def fOParentIndex(t):
@@ -615,7 +625,7 @@ class Bni:
     def FromOniArm(self, lOniArm):
         lBone       = lFlatten([oni.o.data.bones              for oni in lOniArm])
         lBoneArm    = lFlatten([[oni.o]*len(oni.o.data.bones) for oni in lOniArm])
-        lBoneOniDat = [BniDat(a, b, b.name, i) for i, (a, b) in enumerate(zip(lBoneArm, lBone)]
+        lBoneOniDat = [BniDat(a, b, b.name, i) for i, (a, b) in enumerate(zip(lBoneArm, lBone))]
         lArmOniDat  = [x for x in lOniArm.lOniDat]
         return Bni(lBoneOniDat, lOniArm)
     
@@ -625,33 +635,95 @@ class Bni:
             return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
         return [fOParentIndex(t) for t in self.lBoneOniDat]
 
+def IdSubGen(lO, **kwargs):
+    assert 'f' in kwargs
+    dEltId = {}
+    curId = 0
+    for o in lO:
+        for sub in kwargs['f'](o):
+            if sub not in dEltId:
+                dEltId[sub] = curId
+                curId += 1
+    return dEltId
+
+def ObjIdSubGen(lO, **kwargs):
+    assert 'f' in kwargs
+    # Get Subs
+    tmpKwargs = [kwargs['f'](o) for o in lO]
+    # ID Subs
+    dSubId = IdSubGen(lO, f=kwargs['f'])
+    # Size retval
+    idObjSub = [[None for sub in kwa] for kwa in tmpKwargs]
+    # Apply ID to Subs
+    for i, kwa in enumerate(tmpKwargs):
+        for j, sub in enumerate(kwa):
+            idObjSub[i][j] = dSubId[sub]
+    return idObjSub
+
+def GetDiArmId(oMesh):
+    diArmId = IdSubGen(oMesh, f=MeshArmatureAll)
+    return diArmId
+
+def GetDiBoneId(oArm):
+    diArmId = IdSubGen(oArm, f=lambda a: a.data.bones)
+    return diArmId
+
+def GetIdMeshArm(oMesh):
+    idMeshArm = ObjIdSubGen(oMesh, f=MeshArmatureAll)
+    return idMeshArm
+
+def GetIdArmBone(oArm):
+    idArmBone = ObjIdSubGen(oArm, f=lambda a: a.data.bones)
+    return idArmBone
+
+def Blah(lObj, lName):
+    # Calc name->obj dict out of these
+    GetIdParent(lObj, lName, fIndexToParentName=lambda o: o.parent.name)
+    
+def GetIdParent(lObj, lName, **kwargs):
+    assert 'fIndexToParentName' in kwargs
+    assert len(lObj) == len(lName)
+    def fOParentIndex(t):
+        assert t.o.parent == None or t.o.parent in self.byBoneObj
+        return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
+    return [fOParentIndex(i) for i, x in enumerate(lObj)]
+
 class Data:
     def __init__(self):
-        lists = 'meshObj meshName armObj armName boneObj boneName boneArm'.split()
+        lists = 'meshObj meshName meshArm armObj armName armBone boneObj boneName'.split()
         for l in lists:
             setattr(self, l, [])
 
-def MeshMultiSyncIdArmature(oMesh):
-    armId = {}
-    curId = 0
-    for m in oMesh:
-        for a in MeshArmatureAll(m)
-            if a not in armId:
-                armId[a] = curId
-                curId += 1
-    return armId
-
-def MeshMultiSyncGatherArmature(oMesh):
-    armId = MeshMultiSyncIdArmature(oMesh)
-    r = []
-    for m in oMesh:
-        r.append([])
-        for a in MeshArmatureAll(m)
-            r[-1].append(armId[a])
-    return r
-
 def Br2():
     assert BlendMatCheck()
+    
+    oMesh = SceneMeshSelectAll()
+    
+    d = Data()
+    
+    idMeshArm = GetIdMeshArm(oMesh)
+    diArmId = GetDiArmId(oMesh)
+    diIdArm = dReversed(diArmId)
+    assert lSequentialEquiv(diIdArm.keys())
+    oArm = [diIdArm[x] for x in range(len(diIdArm.keys()))]
+    
+    idArmBone = GetIdArmBone(oArm)
+    diBoneId = GetDiBoneId(oArm)
+    diIdBone = dReversed(diBoneId)
+    assert lSequentialEquiv(diIdBone.keys())
+    oBone = [diIdBone[x] for x in range(len(diIdBone.keys()))]
+        
+    for i, m in enumerate(oMesh):
+        lAppendMultiI([d.meshObj, d.meshName, d.meshArm], [m, m.name, idMeshArm[i]])
+
+    for m in oArm:
+        lAppendMultiI([d.armObj, d.armName], [m, m.name])
+    
+    for m in oBone:
+        lAppendMultiI([d.boneObj, d.boneName], [m, m.name])
+        
+    return
+
 
     oMesh = SceneMeshSelectAll()
     oMeshArm = [MeshArmatureAll(x) for x in oMesh]
@@ -661,14 +733,7 @@ def Br2():
     
     oniMesh = Oni.FromObject(oMesh)
     oniArm  = Oni.FromObject(oArmAll)
-    bniBone = Bni.FromOniArm(oniArm)
-    
-    d = Data()
-    
-    dArmId = MeshMultiSyncIdArmature(oMesh)
-    dIdArm = dReversed(armId)
-    
-    idMeshArm = MeshMultiSyncGatherArmature(oMesh)
+    bniBone = Bni.FromOniArm(oniArm)    
         
     meshName   = [m.bid.oMesh.name for m in oMesh]
     meshParent = oniMesh.GetIdParent()
@@ -695,12 +760,12 @@ def Br2():
         Implicit knowledge of Armature (vertex_groups[N].name is assumed to be one of the influencing Armatures)
     """
     
-    meshBoneCount =
+    meshBoneCount = \
         lReduce(lCount(sorted(bniBone.byBoneId,
                               key=lambda bni: bni.a),
-                       f=lambda bni: bni.a)
-                {'lst': [], 'acc': 0}
-                f=lambda x,y: {'lst': lAppend(x.lst, x.acc), 'acc': x.acc + y})
+                       f=lambda bni: bni.a),
+                {'lst': [], 'acc': 0},
+                f=lambda x,y: {'lst': lAppend(x.lst, x.acc), 'acc': x.acc + y}) \
         .lst
         
     meshVert  = [dMeshGetVerts(m.data)   for m in oMesh]
@@ -786,6 +851,7 @@ if __name__ == '__main__':
     import os
 
     if inBlend:
+        Br2()
         p = BlendRun()
         
         # Paranoia length check
