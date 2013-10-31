@@ -64,6 +64,13 @@ def mkIntSec(p, bSecName, lInt):
         mkInt32(pW, n)
     mkSect(p, bSecName, pW.getBytes())
 
+def mkPairIntSec(p, bSecName, lPairInt):
+    pW = P()
+    for pair in lPairInt:
+        mkInt32(pW, pair[0])
+        mkInt32(pW, pair[1])
+    mkSect(p, bSecName, pW.getBytes())
+
 def mkListGenSec(p, bSecName, subSerializer, llSub):
     pW = P()
     for m in llSub:
@@ -679,19 +686,18 @@ def GetIdArmBone(oArm):
     idArmBone = ObjIdSubGen(oArm, f=lambda a: a.data.bones)
     return idArmBone
 
-# Bridge Bone->ArmID
-#   lBone of Mesh = filter(Bones, BelongToAnyMeshArm)
-def Blah(lObj, lName):
-    # Calc name->obj dict out of these
-    GetIdParent(lObj, lName, fIndexToParentName=lambda o: o.parent.name)
-    
-def GetIdParent(lObj, lName, **kwargs):
-    assert 'fIndexToParentName' in kwargs
-    assert len(lObj) == len(lName)
-    def fOParentIndex(t):
-        assert t.o.parent == None or t.o.parent in self.byBoneObj
-        return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
-    return [fOParentIndex(i) for i, x in enumerate(lObj)]
+def GetIdParent(lObj, lId, lName):
+    assert lUniq(lName)
+    lParentName = [o.parent and o.parent.name for o in lObj]
+    diNameId = {name : id for name, id in zip(lName, lId)}
+    diNameId[None] = -1     # Roots get -1
+    return [diNameId[n] for n in lParentName]
+
+def GetIdParentMesh(lMeshObj, lMeshId, lMeshName):
+    return GetIdParent(lMeshObj, lMeshId, lMeshName)
+
+def GetIdParentArmBone(lArmBoneObj, lArmBoneId, lArmBoneName):
+    return GetIdParent(lArmBoneObj, lArmBoneId, lArmBoneName)
 
 def GetWeightsEx2(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
     def GetBoneVertexGroupIdx(oMesh, boneName):
@@ -741,11 +747,12 @@ def Br2():
     assert lSequentialEquiv(diIdArm.keys())
     oArm = [diIdArm[x] for x in range(len(diIdArm.keys()))]
     
+    linkMeshIdArmId = [(iM, idA) for iM, m in enumerate(idMeshArm) for idA in m]
+    
     idArmBone = GetIdArmBone(oArm)
     diBoneId = GetDiBoneId(oArm)
     diIdBone = dReversed(diBoneId)
     assert lSequentialEquiv(diIdBone.keys())
-    # FIXME: Don't like this, maybe compute oBone by iterating idArmBone (Like for lBoneArmId)
     oBone = [diIdBone[x] for x in range(len(diIdBone.keys()))]
     
     assert lSequentialEquiv(lFlatten(idArmBone))
@@ -760,35 +767,32 @@ def Br2():
     for i, m in enumerate(oBone):
         lAppendMultiI([d.boneObj, d.boneName, d.boneArmId], [m, m.name, lBoneArmId[i]])
 
-    meshBoneWeight = []
+    meshName   = d.meshName[:]
+    meshParent = GetIdParentMesh(d.meshObj, range(len(d.meshObj)), d.meshName)
+    meshMatrix = [m.matrix_local for m in d.meshObj]
+    
+    armName   = d.armName[:]
+    armMatrix = [m.matrix_world for m in d.armObj]
+    
+    boneName   = d.boneName[:]
+    boneParent = lFlatten([GetIdParentArmBone([d.boneObj[id] for id in a], a, [d.boneName[id] for id in a]) for a in idArmBone])
+    #NOTE: Bone.matrix_local is in Armature space
+    boneMatrix = [m.matrix_local for m in d.boneObj]
+        
+    meshVert  = [dMeshGetVerts(m.data)   for m in oMesh]
+    meshIndex = [dMeshGetIndices(m.data) for m in oMesh]
+    
+    meshVertBoneWeight = []
     for i, m in enumerate(oMesh):
         lMeshAllArmBoneId, lMeshAllArmBoneName = lUnzip([(j, d.boneName[j]) for j, b in enumerate(oBone) if (d.boneArmId[j] in idMeshArm[i])])
-        lAppendI(meshBoneWeight, GetWeightsEx2(m, lMeshAllArmBoneId, lMeshAllArmBoneName))
-
-    dbg()
-        
-    return
-
-
-    oMesh = SceneMeshSelectAll()
-    oMeshArm = [MeshArmatureAll(x) for x in oMesh]
-    oArmAll  = lFlatten(oMeshArm)
-    assert lUniqP(oMesh, f=lambda x: x.name)
-    assert lUniqP(oArmAll, f=lambda x: x.name)
+        lAppendI(meshVertBoneWeight, GetWeightsEx2(m, lMeshAllArmBoneId, lMeshAllArmBoneName))
     
-    oniMesh = Oni.FromObject(oMesh)
-    oniArm  = Oni.FromObject(oArmAll)
-    bniBone = Bni.FromOniArm(oniArm)    
-        
-    meshName   = [m.bid.oMesh.name for m in oMesh]
-    meshParent = oniMesh.GetIdParent()
-    meshMatrix = [m.o.matrix_local for m in oniMesh.lOniDat]
-    
-    boneName   = [bni.n for bni in bniBone.byBoneId]
-    boneParent = bniBone.GetIdParent()
-    #NOTE: Bone.matrix_local is in Armature space
-    boneMatrix = [bni.o.matrix_local for bni in bniBone.byBoneId]
-    
+    """ Linking Mesh with Armature requires a different structure than linking Bone with Armature.
+        Because Mesh<->Arm is a n:m relationship but Arm<->Bone is a 1:n relationship
+    """
+    linkMeshIdArmId = linkMeshIdArmId
+    boneArmId       = lBoneArmId
+            
     # FIXME: Bone global/local naming collisions
     """
     mesh0 vertex_groups Bone0 Bone1
@@ -804,19 +808,29 @@ def Br2():
         Bone names allowed to clash.
         Implicit knowledge of Armature (vertex_groups[N].name is assumed to be one of the influencing Armatures)
     """
+
+    p = P()
     
-    meshBoneCount = \
-        lReduce(lCount(sorted(bniBone.byBoneId,
-                              key=lambda bni: bni.a),
-                       f=lambda bni: bni.a),
-                {'lst': [], 'acc': 0},
-                f=lambda x,y: {'lst': lAppend(x.lst, x.acc), 'acc': x.acc + y}) \
-        .lst
-        
-    meshVert  = [dMeshGetVerts(m.data)   for m in oMesh]
-    meshIndex = [dMeshGetIndices(m.data) for m in oMesh]
-    meshBoneWeight = ([m.wts for m in am],            [[]    for m in mm])
+    mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
+    mkIntSec(p, b"MESHPARENT", meshParent)
+    mkMatrixSec(p, b"MESHMATRIX", [BlendMatToList(m) for m in meshMatrix])
     
+    mkLenDelSec(p, b"ARMNAME", [BytesFromStr(i) for i in armName])
+    mkMatrixSec(p, b"ARMMATRIX", [BlendMatToList(m) for m in armMatrix])
+    
+    mkLenDelSec(p, b"BONENAME", [BytesFromStr(i) for i in boneName])
+    mkIntSec(p, b"BONEPARENT", boneParent)
+    mkMatrixSec(p, b"BONEMATRIX", [BlendMatToList(m) for m in boneMatrix])
+    
+    mkListFloatSec(p, b"MESHVERT", meshVert)
+    mkListIntSec(p, b"MESHINDEX", meshIndex)
+    mkListListPairIntFloatSec(p, b"MESHVERTBONEWEIGHT", meshVertBoneWeight)
+    
+    mkPairIntSec(p, b"LINKMESHIDARMID", linkMeshIdArmId)
+    mkIntSec(p, b"BONEARMID", boneArmId)
+    
+    return p
+
 def BlendRun():
     assert BlendMatCheck()
 
