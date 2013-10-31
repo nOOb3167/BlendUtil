@@ -676,6 +676,8 @@ def GetIdArmBone(oArm):
     idArmBone = ObjIdSubGen(oArm, f=lambda a: a.data.bones)
     return idArmBone
 
+# Bridge Bone->ArmID
+#   lBone of Mesh = filter(Bones, BelongToAnyMeshArm)
 def Blah(lObj, lName):
     # Calc name->obj dict out of these
     GetIdParent(lObj, lName, fIndexToParentName=lambda o: o.parent.name)
@@ -712,12 +714,15 @@ def Br2():
     diIdBone = dReversed(diBoneId)
     assert lSequentialEquiv(diIdBone.keys())
     oBone = [diIdBone[x] for x in range(len(diIdBone.keys()))]
+    
+    assert lSequentialEquiv(lFlatten(idArmBone))
+    lBoneArmId = [iA for iA, a in enumerate(idArmBone) for idB in a]
         
     for i, m in enumerate(oMesh):
         lAppendMultiI([d.meshObj, d.meshName, d.meshArm], [m, m.name, idMeshArm[i]])
 
-    for m in oArm:
-        lAppendMultiI([d.armObj, d.armName], [m, m.name])
+    for i, m in enumerate(oArm):
+        lAppendMultiI([d.armObj, d.armName, d.armBone], [m, m.name, idArmBone[i]])
     
     for m in oBone:
         lAppendMultiI([d.boneObj, d.boneName], [m, m.name])
