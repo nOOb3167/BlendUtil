@@ -580,6 +580,9 @@ def lSequentialEquiv(l):
 def lSequentialContain(l):
     return lSequentialEquiv(l.sorted())
 
+def lUnzip(l):
+    return zip(*l)
+
 def dReversed(d):
     assert lUniqP(d.values())
     return {v : k for k, v in d.items()}
@@ -690,18 +693,47 @@ def GetIdParent(lObj, lName, **kwargs):
         return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
     return [fOParentIndex(i) for i, x in enumerate(lObj)]
 
+def GetWeightsEx2(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
+    def GetBoneVertexGroupIdx(oMesh, boneName):
+        for g in oMesh.vertex_groups:
+            if g.name == boneName:
+                return g.index
+        return None
+
+    def MakeMapVGIdxBoneId(oMesh, lBoneId, lBoneName):
+        lVGIdx = [GetBoneVertexGroupIdx(oMesh, name) for name in lBoneName]
+        assert lUniqP([x for x in lVGIdx if x is not None])
+        mapVGIdxBoneId = dict(zip(lVGIdx, lBoneId))
+        if None in mapVGIdxBoneId: del mapVGIdxBoneId[None]
+        return mapVGIdxBoneId
+        
+    llIF = [[] for x in range(len(oMesh.data.vertices))]
+        
+    mapVGIdxBoneId = MakeMapVGIdxBoneId(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName)
+    
+    assert lSequentialEquiv([v.index for v in oMesh.data.vertices])
+    
+    for i, v in enumerate(oMesh.data.vertices):
+        for g in v.groups:
+            inflBoneId = mapVGIdxBoneId[g.group]
+            if inflBoneId is not None:
+                llIF[i].append([inflBoneId, g.weight])
+    
+    return llIF
+    
+
 class Data:
     def __init__(self):
-        lists = 'meshObj meshName meshArm armObj armName armBone boneObj boneName'.split()
+        lists = 'meshObj meshName meshArm armObj armName armBone boneObj boneName boneArmId'.split()
         for l in lists:
             setattr(self, l, [])
 
 def Br2():
     assert BlendMatCheck()
     
-    oMesh = SceneMeshSelectAll()
-    
     d = Data()
+    
+    oMesh = SceneMeshSelectAll()
     
     idMeshArm = GetIdMeshArm(oMesh)
     diArmId = GetDiArmId(oMesh)
@@ -713,6 +745,7 @@ def Br2():
     diBoneId = GetDiBoneId(oArm)
     diIdBone = dReversed(diBoneId)
     assert lSequentialEquiv(diIdBone.keys())
+    # FIXME: Don't like this, maybe compute oBone by iterating idArmBone (Like for lBoneArmId)
     oBone = [diIdBone[x] for x in range(len(diIdBone.keys()))]
     
     assert lSequentialEquiv(lFlatten(idArmBone))
@@ -724,8 +757,15 @@ def Br2():
     for i, m in enumerate(oArm):
         lAppendMultiI([d.armObj, d.armName, d.armBone], [m, m.name, idArmBone[i]])
     
-    for m in oBone:
-        lAppendMultiI([d.boneObj, d.boneName], [m, m.name])
+    for i, m in enumerate(oBone):
+        lAppendMultiI([d.boneObj, d.boneName, d.boneArmId], [m, m.name, lBoneArmId[i]])
+
+    meshBoneWeight = []
+    for i, m in enumerate(oMesh):
+        lMeshAllArmBoneId, lMeshAllArmBoneName = lUnzip([(j, d.boneName[j]) for j, b in enumerate(oBone) if (d.boneArmId[j] in idMeshArm[i])])
+        lAppendI(meshBoneWeight, GetWeightsEx2(m, lMeshAllArmBoneId, lMeshAllArmBoneName))
+
+    dbg()
         
     return
 
