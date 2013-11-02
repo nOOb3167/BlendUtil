@@ -726,7 +726,80 @@ def GetWeightsEx2(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
                 llIF[i].append([inflBoneId, g.weight])
     
     return llIF
+
+def Br3():
+    class Data:
+        for l in ''.split(): setattr(self, l, [])
+            
+    d = Data()
     
+    TupMab  = namedtuple('Mab', ['M', 'A', 'B', 'oM', 'oA', 'oB'])
+    TupMabM = namedtuple('MabM', ['M', 'oM'])
+    TupMabA = namedtuple('MabA', ['A', 'oA'])
+    TupMabB = namedtuple('MabB', ['A', 'B', 'oB'])
+
+    TuptM = namedtuple('tM', ['id', 'M', 'oM'])
+    TuptA = namedtuple('tA', ['id', 'A', 'oA'])
+    TuptB = namedtuple('tB', ['id', 'A', 'B', 'oB'])
+    
+    TuptlMA = namedtuple('tlMA', ['idM', 'idA'])
+    TuptlBA = namedtuple('tlBA', ['idB', 'idA'])
+    
+    TuptMParent = namedtuple('tMParent', ['id', 'idP'])
+    TuptBParent = namedtuple('tBParent', ['id', 'idP'])
+        
+    lMab = []
+    for m in SceneMeshSelectAll():
+        for a in MeshArmatureAll(m):
+            for b in a.data.bones:
+                lAppendI(lMab, TupMab(m.name, a.name, b.name, m, a, b))
+    
+    def MabTrimM(): return lMap(lUniq(lMab, f=lambda x: x.M), f=lambda x: TupMabM(x.M, x.oM))
+    def MabTrimA(): return lMap(lUniq(lMab, f=lambda x: x.A), f=lambda x: TupMabA(x.A, x.oA))
+    def MabTrimB(): return lMap(lUniq(lMab, f=lambda x: (x.A, x.B)), f=lambda x: TupMabB(x.A, x.B, x.oB))
+    lMabM = MabTrimM()
+    lMabA = MabTrimA()
+    lMabB = MabTrimB()
+    
+    tM = [TuptM(i, m.M, m.oM)      for i, m in enumerate(lMabM)]
+    tA = [TuptA(i, m.A, m.oA)      for i, m in enumerate(lMabA)]
+    tB = [TuptB(i, m.A, m.B, m.oB) for i, m in enumerate(lMabB)]
+
+    def GenQuery_tbl_attr_val(tbl, attr, val):
+        for m in tbl:
+            if getattr(m, attr) == val:
+                return m
+        assert 0
+    
+    def GenQueryComposite_tbl_lAttr_lVal(tbl, lAttr, lVal):
+        for m in tbl:
+            if [getattr(m, attr) for attr in lAttr] == lVal:
+                return m
+        assert 0
+        
+    def GenUniq_tbl_attr(tbl, attr):
+        return lUniq(tbl, lambda m: getattr(m, attr))
+        
+    def GenUniqComposite_tbl_lAttr(tbl, lAttr):
+        return lUniq(tbl, f=lambda m: tuple([getattr(m, attr) for attr in lAttr]))
+    
+    def Query_tM_M(M): return GenQuery_tbl_attr_val(tM, 'M', M)
+    def Query_tA_A(A): return GenQuery_tbl_attr_val(tA, 'A', A)
+    def QueryC_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
+        
+    def tUniq(tbl, attrPlus):
+        return GenUniqComposite_tbl_lAttr(tbl, attrPlus if isinstance(attrPlus, list) else [attrPlus])
+        
+    tlMA = [TuptlMA(Query_tM_M(m.M).id, Query_tA_A(m.A).id) for m in lMab]
+    tlBA = [TuptlBA(QueryC_tB_AB([m.A, m.B]).id, Query_tA_A(m.A).id) for m in lMab]
+    
+    def Query_tlBA_idB(idB): return GenQuery_tbl_attr_val(tlBA, 'idB', idB)
+    
+    tUniq(tlMA, 'idM')
+    tUniq(tlBA, ['idA', 'idB'])
+                
+    tMParent = [TuptMParent(m.id, m.oM.parent and Query_tM_M(m.oM.parent.name) or -1)  for m in tM]
+    tBParent = [TuptBParent(m.id, m.oB.parent and Query_tlBA_idB(m.id) or -1)          for m in tB]
 
 class Data:
     def __init__(self):
@@ -910,6 +983,7 @@ if __name__ == '__main__':
     import os
 
     if inBlend:
+        Br3()
         Br2()
         p = BlendRun()
         
