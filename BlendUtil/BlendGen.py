@@ -700,6 +700,8 @@ def GetIdParentArmBone(lArmBoneObj, lArmBoneId, lArmBoneName):
     return GetIdParent(lArmBoneObj, lArmBoneId, lArmBoneName)
 
 def GetWeightsEx2(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
+    #FIXME: For the case of a mesh with no Bones
+    
     def GetBoneVertexGroupIdx(oMesh, boneName):
         for g in oMesh.vertex_groups:
             if g.name == boneName:
@@ -765,42 +767,89 @@ def Br3():
     tA = [TuptA(i, m.A, m.oA)      for i, m in enumerate(lMabA)]
     tB = [TuptB(i, m.A, m.B, m.oB) for i, m in enumerate(lMabB)]
 
-    def GenQuery_tbl_attr_val(tbl, attr, val):
-        for m in tbl:
-            if getattr(m, attr) == val:
-                return m
-        assert 0
+    def tinorder(t, attrPlus):
+        lAttr = attrPlus if isinstance(attrPlus, list) else [attrPlus]
+        for i, m in enumerate(t):
+            compKey = tuple([getattr(m, attr) for attr in lAttr])
+            if i > 0: assert old < compKey
+            old = compKey
+            yield m
     
+    def GenQuery_tbl_attr_val(tbl, attr, val):
+        return GenQueryComposite_tbl_lAttr_lVal(tbl, [attr], [val])
     def GenQueryComposite_tbl_lAttr_lVal(tbl, lAttr, lVal):
-        for m in tbl:
-            if [getattr(m, attr) for attr in lAttr] == lVal:
-                return m
-        assert 0
+        lst = GenQueryCompositeL_tbl_lAttr_lVal(tbl, lAttr, lVal); assert len(lst); return lst[0]
+    def GenQueryCompositeL_tbl_lAttr_lVal(tbl, lAttr, lVal):
+        return [m for m in tbl if [getattr(m, attr) for attr in lAttr] == lVal]
         
     def GenUniq_tbl_attr(tbl, attr):
-        return lUniq(tbl, lambda m: getattr(m, attr))
-        
+        return lUniq(tbl, lambda m: getattr(m, attr))        
     def GenUniqComposite_tbl_lAttr(tbl, lAttr):
         return lUniq(tbl, f=lambda m: tuple([getattr(m, attr) for attr in lAttr]))
+    def GenSortComposite_tbl_lAttr(tbl, lAttr):
+        return sorted(tbl, key=lambda m: tuple([getattr(m, attr) for attr in lAttr]))
     
     def Query_tM_M(M): return GenQuery_tbl_attr_val(tM, 'M', M)
+    def Query_tA_id(id): return GenQuery_tbl_attr_val(tA, 'id', id)
     def Query_tA_A(A): return GenQuery_tbl_attr_val(tA, 'A', A)
+    def Query_tB_id(id): return GenQuery_tbl_attr_val(tB, 'id', id)
     def QueryC_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
+    def QueryL_tlMA_idM(idM): return GenQueryCompositeL_tbl_lAttr_lVal(tlMA, ['idM'], [idM])
+    def QueryL_tlBA_idA(idA): return GenQueryCompositeL_tbl_lAttr_lVal(tlBA, ['idA'], [idA])
         
     def tUniq(tbl, attrPlus):
-        return GenUniqComposite_tbl_lAttr(tbl, attrPlus if isinstance(attrPlus, list) else [attrPlus])
+        lAttr = attrPlus if isinstance(attrPlus, list) else [attrPlus]
+        return GenSortComposite_tbl_lAttr(GenUniqComposite_tbl_lAttr(tbl, lAttr), lAttr)
+    def tUniqI(tbl, attrPlus):
+        tbl[:] = tUniq(tbl, attrPlus)
+        return tbl
         
     tlMA = [TuptlMA(Query_tM_M(m.M).id, Query_tA_A(m.A).id) for m in lMab]
     tlBA = [TuptlBA(QueryC_tB_AB([m.A, m.B]).id, Query_tA_A(m.A).id) for m in lMab]
     
     def Query_tlBA_idB(idB): return GenQuery_tbl_attr_val(tlBA, 'idB', idB)
     
-    tUniq(tlMA, 'idM')
-    tUniq(tlBA, ['idA', 'idB'])
-                
     tMParent = [TuptMParent(m.id, m.oM.parent and Query_tM_M(m.oM.parent.name) or -1)  for m in tM]
     tBParent = [TuptBParent(m.id, m.oB.parent and Query_tlBA_idB(m.id) or -1)          for m in tB]
-
+    
+    tUniqI(tM, 'id')
+    tUniqI(tA, 'id')
+    tUniqI(tB, 'id')
+    tUniqI(tlMA, 'idM')
+    tUniqI(tlBA, ['idA', 'idB'])
+    tUniqI(tMParent, 'id')
+    tUniqI(tBParent, 'id')
+    
+    meshName = [m.M for m in tinorder(tM, 'id')]
+    meshParent = [m.idP for m in tinorder(tMParent, 'id')]
+    meshMatrix = [m.oM.matrix_world for m in tinorder(tM, 'id')]
+    
+    armName   = [m.A for m in tinorder(tA, 'id')]
+    armMatrix = [m.oA.matrix_world for m in tinorder(tA, 'id')]
+    
+    boneName = [m.B for m in tinorder(tB, 'id')]
+    boneParent = [m.idP for m in tinorder(tBParent, 'id')]
+    #NOTE: Bone.matrix_local is in Armature space
+    boneMatrix = [m.oB.matrix_local for m in tinorder(tB, 'id')]
+    
+    meshVert  = [dMeshGetVerts(m.oM.data)   for m in tinorder(tM, 'id')]
+    meshIndex = [dMeshGetIndices(m.oM.data) for m in tinorder(tM, 'id')]
+    
+    def my_range(start, end, step):
+        while start <= end:
+            yield start
+            start += step
+    
+    meshVertBoneWeight = []
+    for m in tinorder(tM, 'id'):
+        lMeshAllArmId = sorted([t.idA for t in QueryL_tlMA_idM(m.id)])
+        lMeshAllArmBonetlBA = lFlatten([QueryL_tlBA_idA(a) for a in lMeshAllArmId])
+        lMeshAllArmBoneId   = [t.idB for t in tinorder(lMeshAllArmBonetlBA, 'idB')]
+        lMeshAllArmBoneName = [Query_tB_id(t.idB).B for t in tinorder(lMeshAllArmBonetlBA, 'idB')]
+        assert lUniqP(lMeshAllArmBoneName) and lUniqP(lMeshAllArmBoneName)
+        lAppendI(meshVertBoneWeight, GetWeightsEx2(m.oM, lMeshAllArmBoneId, lMeshAllArmBoneName))
+    
+                
 class Data:
     def __init__(self):
         lists = 'meshObj meshName meshArm armObj armName armBone boneObj boneName boneArmId'.split()
