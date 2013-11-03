@@ -420,35 +420,27 @@ public:
 
 class SectionData {
 public:
-	vector<string> nodeName;
-	vector<int>    nodeParent;
-	vector<DMat>   nodeMatrix;
-
-	vector<int> nodeMesh;
+	vector<string> meshName;
+	vector<int>    meshParent;
+	vector<DMat>   meshMatrix;
 
 	vector<string> boneName;
 	vector<int>    boneParent;
 	vector<DMat>   boneMatrix;
 
-	vector<string> meshName;
-	vector<int>    meshBoneCount;
 	vector<vector<float> > meshVert;
 	vector<vector<int> >   meshIndex;
-	vector<DMat>           meshRootMatrix;
-
-	vector<vector<vector<pair<int, float> > > > meshBoneWeight;
-};
-
-class SectionDataEx : public SectionData {
-public:
-	vector<vector<int> > nodeChild;
-	vector<vector<int> > boneChild;
-
-	vector<vector<int> > meshBone;
 
 	/* [Mesh0: [Vert0: id*BU_MAX_INFLUENCING_BONE ...] ...] */
 	vector<vector<int> >   meshVertId;
 	vector<vector<float> > meshVertWt;
+
+	vector<vector<int> > meshChild;
+	vector<vector<int> > boneChild;
+};
+
+class SectionDataEx : public SectionData {
+public:
 };
 
 bool MultiRootReachabilityCheck(const vector<vector<int> > &child, const vector<int> &parent) {
@@ -555,28 +547,20 @@ public:
 		SectionDataEx *sd = new SectionDataEx();
 		FillSectionData(sec, sd);
 		CheckSectionData(*sd);
-		FillSectionDataExtra(sd);
-		CheckSectionDataEx(*sd);
 
 		return sd;
 	}
 
 	static void FillSectionData(const vector<Section> &sec, SectionData *outSD) {
-		FillLenDel(SectionGetByName(sec, "NODENAME").data, &outSD->nodeName);
-		FillInt(SectionGetByName(sec, "NODEPARENT").data, &outSD->nodeParent);
-		FillMat(SectionGetByName(sec, "NODEMATRIX").data, &outSD->nodeMatrix);
-
-		FillInt(SectionGetByName(sec, "NODEMESH").data, &outSD->nodeMesh);
+		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
+		FillInt(SectionGetByName(sec, "MESHPARENT").data, &outSD->meshParent);
+		FillMat(SectionGetByName(sec, "MESHMATRIX").data, &outSD->meshMatrix);
 
 		FillLenDel(SectionGetByName(sec, "BONENAME").data, &outSD->boneName);
 		FillInt(SectionGetByName(sec, "BONEPARENT").data, &outSD->boneParent);
 		FillMat(SectionGetByName(sec, "BONEMATRIX").data, &outSD->boneMatrix);
 
-		FillLenDel(SectionGetByName(sec, "MESHNAME").data, &outSD->meshName);
-		FillInt(SectionGetByName(sec, "MESHBONECOUNT").data, &outSD->meshBoneCount);
-
-		for (auto &i : outSD->meshBoneCount)
-			assert(i >= 0 && i <= BU_MAX_TOTAL_BONE_PER_MESH);
+		assert(outSD->boneName.size() <= BU_MAX_TOTAL_BONE_PER_MESH);
 
 		{
 			vector<string>         mVertChunks;
@@ -604,96 +588,93 @@ public:
 			outSD->meshIndex = mIndex;
 		}
 
-		FillMat(SectionGetByName(sec, "MESHROOTMATRIX").data, &outSD->meshRootMatrix);
-
 		{
 			int numMesh = outSD->meshName.size();
-			int numAllBone = outSD->boneName.size();
-			vector<int> meshBoneCount = outSD->meshBoneCount;
+
+			vector<vector<int> > mVBWeightId;
+			vector<vector<float> > mVBWeightWt;
 
 			vector<string> mBWChunks;
-			vector<vector<vector<pair<int, float> > > > mBWeight;
+			FillLenDel(SectionGetByName(sec, "MESHVERTBONEWEIGHT").data, &mBWChunks);
+			/* MESHVERTBONEWEIGHT stored as flat (MeshN x VertOfMeshN) -> [pairIdWt, ...]
+			*  Accumulate-skip numVert[MeshN] entries to get to Mesh_{N+1} data. */
+			assert(mBWChunks.size() == accumulate(outSD->meshVert.begin(), outSD->meshVert.end(), 0, [](int a, const vector<float> &x) { return a + x.size(); }));
 
-			FillLenDel(SectionGetByName(sec, "MESHBONEWEIGHT").data, &mBWChunks);
-			assert(mBWChunks.size() == numAllBone);
-			assert(mBWChunks.size() == accumulate(meshBoneCount.begin(), meshBoneCount.end(), 0, [](int a, int x) { return a + x; }));
-
-			mBWeight = vector<vector<vector<pair<int, float> > > >(numMesh);
-			for (int i = 0; i < numMesh; i++)
-				mBWeight[i] = vector<vector<pair<int, float> > >(meshBoneCount[i]);
+			mVBWeightId = vector<vector<int> >(numMesh);
+			mVBWeightWt = vector<vector<float> >(numMesh);
+			for (int i = 0; i < numMesh; i++) {
+				int numVert = mNumVertFromSize(outSD->meshVert[i].size());
+				mVBWeightId[i] = vector<int>(BU_MAX_INFLUENCING_BONE * numVert);
+				mVBWeightId[i] = vector<int>(BU_MAX_INFLUENCING_BONE * numVert);
+			}
 
 			int currBaseIdx = 0;
 			for (int m = 0; m < numMesh; m++) {
-				for (int b = 0; b < meshBoneCount[m]; b++) {
+				int numVert = mNumVertFromSize(outSD->meshVert[m].size());
+				for (int i = 0; i < numVert; i++) {
 					vector<pair<int, float> > v;
-					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[currBaseIdx + b]), &v);
-					mBWeight[m][b] = v;
+					FillPairIntFloat(Slice(slice_str_t(), mBWChunks[currBaseIdx + i]), &v);
+
+					vector<pair<int, float> > finals = v;
+
+					/* Sort by Descending weight */
+					sort(finals.begin(), finals.end(),
+						[](const pair<int, float> &a, const pair<int, float> &b) {
+							/* FIXME: Floating point comparison sync alert */
+							return a.second > b.second;
+					});
+
+					/* Cut if have too many influencing bones, zero pad if too few */
+					finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
+
+					/* Normalize weights
+					*  In Blender, weight painting produces weights in [0.0, 1.0] for individual Bone irregardless of other Bone weights.
+					*  Thus painting multiple Bones produces multiple weights, each in [0.0, 1.0].
+					*    - Weights have to sum to 1.0
+					*    - influA having the same Blender weight as influB should result in having the same final weight
+					*    - influA having a Blender weight 'n' times as high as InfluB should result in having 'n' times the final weight
+					*  finalWeights = map(lambda x: x / sum(influWeights), influWeights) # Just a division by sum of influences
+					*/
+					float influWeightSum = accumulate(finals.begin(), finals.end(), 0.0f, [](float a, pair<int, float> x) { return a + x.second; });
+					if (!ScaZero(influWeightSum))
+						transform(finals.begin(), finals.end(), finals.begin(), [&influWeightSum](pair<int, float> x) { return make_pair(x.first, x.second / influWeightSum); });
+
+					assert(BU_MAX_INFLUENCING_BONE == finals.size());
+					for (int j = 0; j < BU_MAX_INFLUENCING_BONE; j++) {
+						mVBWeightId[m][(BU_MAX_INFLUENCING_BONE * i) + j] = finals[j].first;
+						mVBWeightWt[m][(BU_MAX_INFLUENCING_BONE * i) + j] = finals[j].second;
+					}
 				}
-				currBaseIdx += meshBoneCount[m];
+				currBaseIdx += numVert;
 			}
 
-			outSD->meshBoneWeight = mBWeight;
+			outSD->meshVertId = mVBWeightId;
+			outSD->meshVertWt = mVBWeightWt;
 		}
-	}
 
-	static void FillSectionDataExtra(SectionDataEx *outSD) {
-		FillChild(outSD->nodeParent, &outSD->nodeChild);
+		FillChild(outSD->meshParent, &outSD->meshChild);
 		FillChild(outSD->boneParent, &outSD->boneChild);
-
-		{
-			int         numMesh       = outSD->meshName.size();
-			vector<int> meshBoneCount = outSD->meshBoneCount;
-
-			vector<vector<int> > meshBone(numMesh);
-			for (int i = 0; i < meshBone.size(); i++)
-				meshBone[i] = vector<int>(meshBoneCount[i]);
-
-			int currBaseIdx = 0;
-			for (int m = 0; m < numMesh; m++) {
-				for (int b = 0; b < meshBoneCount[m]; b++)
-					meshBone[m][b] = currBaseIdx + b;
-				currBaseIdx += meshBoneCount[m];
-			}
-
-			outSD->meshBone = meshBone;
-		}
-
-		FillMeshVertInfluence(outSD->meshVert, outSD->meshBoneWeight, &outSD->meshVertId, &outSD->meshVertWt);
 	}
 
 	static void CheckSectionData(const SectionData &sd) {
-		int numNode = sd.nodeName.size();
 		int numMesh = sd.meshName.size();
 		int numBone = sd.boneName.size();
 
-		/* No nodes in the model? */
-		assert(numNode);
-		assert(numNode == sd.nodeParent.size());
+		/* No Mesh in the model? */
+		assert(numMesh);
+		assert(numMesh == sd.meshParent.size());
+		assert(numMesh == sd.meshChild.size());
 		/* Empty names? */
-		for (auto &i : sd.nodeName)
+		for (auto &i : sd.meshName)
 			assert(i.size());
-		for (auto &i : sd.nodeParent)
-			assert(i == -1 || (i >= 0 && i < numNode));
-		assert(!IsCycle(sd.nodeParent));
-		assert(numNode == sd.nodeMatrix.size());
-
-		assert(numNode == sd.nodeMesh.size());
-		for (auto &i : sd.nodeMesh)
+		for (auto &i : sd.meshParent)
 			assert(i == -1 || (i >= 0 && i < numMesh));
-		{
-			/* Check against duplicate mesh assignments. A particular Mesh should be assigned to only one node. */
-			vector<int> tmpNodeMesh = sd.nodeMesh;
-			auto it = remove(tmpNodeMesh.begin(), tmpNodeMesh.end(), -1);
-			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it));
-			int sansNegative = tmpNodeMesh.size(); /* -1 elements are not Mesh assignment. Do not count them. */
-			auto it2 = unique(tmpNodeMesh.begin(), tmpNodeMesh.end());
-			tmpNodeMesh.resize(distance(tmpNodeMesh.begin(), it2));
-			int sansDuplicate = tmpNodeMesh.size(); /* Maintaining size after duplicate removal means no multiple assignment occured. */
-			assert(sansNegative == sansDuplicate);
-		}
+		assert(!IsCycle(sd.meshParent));
+		assert(numMesh == sd.meshMatrix.size());
 
 		assert(numBone);
 		assert(numBone == sd.boneParent.size());
+		assert(numBone == sd.boneChild.size());
 		for (auto &i : sd.boneName)
 			assert(i.size());
 		for (auto &i : sd.boneParent)
@@ -701,13 +682,19 @@ public:
 		assert(!IsCycle(sd.boneParent));
 		assert(numBone == sd.boneMatrix.size());
 
-		assert(numMesh);
-		assert(numMesh == sd.meshBoneCount.size());
 		assert(numMesh == sd.meshVert.size());
-	}
 
-	static void CheckSectionDataEx(const SectionDataEx &sd) {
+		for (int i = 0; i < numMesh; i++) {
+			int numVert = mNumVertFromSize(sd.meshVert[i].size());
 
+			assert(sd.meshVertId[i].size() == BU_MAX_INFLUENCING_BONE * numVert);
+			assert(sd.meshVertWt[i].size() == BU_MAX_INFLUENCING_BONE * numVert);
+
+			for (auto &j : sd.meshVertId[i])
+				assert(j >= 0 && j < numBone);
+			for (auto &j : sd.meshVertWt[i])
+				assert(j >= 0.0 && j <= 1.0);
+		}
 	}
 
 	static void FillChild(const vector<int> &inParent, vector<vector<int> > *outSD) {
@@ -719,122 +706,9 @@ public:
 		*outSD = cAcc;	
 	}
 
-	static void FillMeshVertInfluence(
-		const vector<vector<float> > &meshVert /* Vert counts */,
-		const vector<vector<vector<pair<int, float> > > > &meshBoneWeight,
-		vector<vector<int> > *oMeshVertId,
-		vector<vector<float> > *oMeshVertWt)
-	{
-		int numMesh = meshBoneWeight.size();
-
-		vector<vector<int> >   meshVertId(numMesh);
-		vector<vector<float> > meshVertWt(numMesh);
-
-		/* FIXME: Currently generating influences even for meshes with no Bones.
-				  (All zero weights for every vertex of a boneless mesh) */
-		for (int i = 0; i < numMesh; i++)
-			FillMeshVertInfluenceOne(meshVert[i], meshBoneWeight[i], &meshVertId[i], &meshVertWt[i]);
-
-		*oMeshVertId = meshVertId;
-		*oMeshVertWt = meshVertWt;
-	}
-
-	static void FillMeshVertInfluenceOne(
-		const vector<float> &meshVert /* Vert count */,
-		const vector<vector<pair<int, float> > > &boneWeight,
-		vector<int> *oMeshVertId,
-		vector<float> *oMeshVertWt)
-	{
-		int numVert = mNumVertFromSize(meshVert.size());
-		int numBone = boneWeight.size();
-
-		vector<int>   meshVertId(BU_MAX_INFLUENCING_BONE * numVert);
-		vector<float> meshVertWt(BU_MAX_INFLUENCING_BONE * numVert);
-
-		vector<int> curVisited(numBone, 0);
-
-		/* Sort by Ascending id */
-		vector<vector<pair<int, float> > > boneWeightSorted = boneWeight;
-		for (auto &i : boneWeightSorted)
-			sort(i.begin(), i.end(), [](pair<int, float> a, pair<int, float> b) { return a.first < b.first; });
-
-		for (int i = 0; i < numVert; i++) {
-			mInfluCounterAdvance(boneWeightSorted, i, &curVisited);
-			vector<pair<int, float> > influ = mInfluGather(boneWeight, i, curVisited);
-
-			assert(influ.size() == BU_MAX_INFLUENCING_BONE);
-			for (int j = 0; j < influ.size(); j++) {
-				meshVertId[(BU_MAX_INFLUENCING_BONE * i) + j] = influ[j].first;
-				meshVertWt[(BU_MAX_INFLUENCING_BONE * i) + j] = influ[j].second;
-			}
-		}
-
-		*oMeshVertId = meshVertId;
-		*oMeshVertWt = meshVertWt;
-	}
-
 	static int mNumVertFromSize(int nFloats) {
 		assert(nFloats % 3 == 0);
 		return nFloats / 3;
-	}
-
-	static void mInfluCounterAdvance(const vector<vector<pair<int, float> > > &boneWeight, int state, vector<int> *ioCurVisited) {
-		for (int i = 0; i < boneWeight.size(); i++) {
-			int &curVisited   = (*ioCurVisited)[i];
-			int  nextVisited  = curVisited + 1;
-			int  finalVisited = boneWeight[i].size() - 1;
-
-			if (curVisited < finalVisited && boneWeight[i][nextVisited].first == state)
-				curVisited += 1;
-		}
-	}
-
-	static vector<pair<int, float> > mInfluGather(const vector<vector<pair<int, float> > > &boneWeight, int state, const vector<int> &curVisited) {
-		/* Remember: In the returned pair<int, float>, int is bone number.
-		* In boneWeight, int is vertex id instead. */
-
-		vector<int> boneCandidate;
-
-		for (int i = 0; i < boneWeight.size(); i++)
-			/* FIXME: boneWeight[i].size() check specifically workarounds the case of a Bone having no weights.
-					  In this case curVisited[i] is still zero, but needs to be handled specifically as boneWeight[i][0] can not be visited. */
-			if (boneWeight[i].size() && boneWeight[i][curVisited[i]].first == state)
-				boneCandidate.push_back(i);
-
-		/* Sort by Descending weight */
-		sort(boneCandidate.begin(), boneCandidate.end(),
-			[&boneWeight, &curVisited, &state](int a, int b) {
-				assert(boneWeight[a][curVisited[a]].first == state && boneWeight[b][curVisited[b]].first == state);
-				/* FIXME: Floating point comparison sync alert */
-				return boneWeight[a][curVisited[a]].second > boneWeight[b][curVisited[b]].second;
-		});
-
-		vector<pair<int, float> > finals;
-
-		for (auto &i : boneCandidate)
-			finals.push_back(make_pair(i, boneWeight[i][curVisited[i]].second));
-
-		/* Cut if have too many influencing bones, zero pad if too few */
-		finals.resize(BU_MAX_INFLUENCING_BONE, make_pair(0, 0.0f));
-
-		/* Normalize weights:
-		     In Blender, weight painting a Bone influence always produces weights in [0.0, 1.0].
-			 Thus painting multiple Bone influences produces multiple weights, each in [0.0, 1.0].
-		   But of course, the weights have to sum to 1.0 and not higher (Or lower).
-		   (https://www.cs.tcd.ie/publications/tech-reports/reports.06/TCD-CS-2006-46.pdf
-		    IIRC that dual quaternion skinning paper mentioned summing to 1.0 is required for coordinate system invariance of the Bone blending step.
-		    """It is interesting to note that coordinate-invariance is also the reason why the weights w1,...,wn of a linear combination of points are re- quired to satisfy the equation w1+...+wn=1.""")
-		   Additionally influA having the same Blender weight as influB should result in having the same final weight.
-		   And InfluA having a Blender weight 'n' times as high as InfluB should result in having 'n' times the final InfluB influence.
-		   As Blender people hate documentation and would never accidentally tell what the correct conversion to final usable weight is,
-		   hopefully the formula following formula, satisfying the above constraints is adequate:
-		     finalWeights = map(lambda x: x / sum(influWeights), influWeights) # Just a division by sum of influences
-			 The division happens only if nonzero influences exist for the vertex (Otherwise left at zero). */
-		float influWeightSum = accumulate(finals.begin(), finals.end(), 0.0f, [](float a, pair<int, float> x) { return a + x.second; });
-		if (!ScaZero(influWeightSum))
-			transform(finals.begin(), finals.end(), finals.begin(), [&influWeightSum](pair<int, float> x) { return make_pair(x.first, x.second / influWeightSum); });
-
-		return finals;
 	}
 
 	static bool IsCycle(const vector<int> &parent) {
@@ -989,15 +863,6 @@ P * MakePFromFile(const string &fname) {
 SectionDataEx * BlendUtilMakeSectionDataEx(const string &fName) {
 	shared_ptr<P> p(MakePFromFile(fName.c_str()));
 	SectionDataEx *sd = Parse::MakeSectionDataEx(*p);
-
-	vector<DMat> nodeWorldIdentityRoot(sd->nodeName.size(), DMat::MakeIdentity());
-	vector<DMat> nodeWorldMatrix(sd->nodeName.size());
-	vector<DMat> boneWorldMatrix(sd->boneName.size());
-	vector<DMat> boneMeshToBoneMatrix(sd->boneName.size());
-
-	MultiRootMatrixAccumulateWorld(sd->nodeMatrix, sd->nodeChild, sd->nodeParent, nodeWorldIdentityRoot, &nodeWorldMatrix);
-	MultiRootMatrixAccumulateWorld(sd->boneMatrix, sd->boneChild, sd->boneParent, sd->meshRootMatrix, &boneWorldMatrix);
-	MatrixMeshToBone(sd->meshBoneCount, nodeWorldMatrix, boneWorldMatrix, &boneMeshToBoneMatrix);
 
 	return sd;
 }

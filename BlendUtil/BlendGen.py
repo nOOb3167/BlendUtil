@@ -521,14 +521,19 @@ def Br3():
     
     p = P()
 
+    mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
+    mkIntSec(p, b"MESHPARENT", boneParent)
     mkMatrixSec(p, b"MESHMATRIX", [BlendMatToList(m) for m in meshMatrix])    
+    
+    mkLenDelSec(p, b"BONENAME", [BytesFromStr(i) for i in boneName])
+    mkIntSec(p, b"BONEPARENT", boneParent)
     mkMatrixSec(p, b"BONEMATRIX", [BlendMatToList(m) for m in boneMatrix])
+    
     mkListFloatSec(p, b"MESHVERT", meshVert)
     mkListIntSec(p, b"MESHINDEX", meshIndex)
     mkListListPairIntFloatSec(p, b"MESHVERTBONEWEIGHT", meshVertBoneWeight)
-    
-    dbg()
-    raise NotImplementedError()
+        
+    return p
         
 def BlendRun():
     assert BlendMatCheck()
@@ -609,9 +614,11 @@ if __name__ == '__main__':
     import os
 
     if inBlend:
-        Br3()
-        Br2()
-        p = BlendRun()
+        #Br2()
+        #p = BlendRun()
+        p = Br3()
+        
+        assert len(p.getBytes()) <= 1024 * 1024 # Arbitrary length limit
         
         # Paranoia length check
         assert len(sys.argv) == 7
