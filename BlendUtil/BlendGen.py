@@ -152,265 +152,12 @@ def run():
     print(p.l)
 
     return p
-
-def GetMeshArmature(oMesh):
-    for m in oMesh.modifiers:
-        if m.type == 'ARMATURE':
-            assert m.object.type == 'ARMATURE'
-            return m.object
-    return None
-
-def RecursiveParentRoot(rp):
-    if not len(rp): return None
-    return rp[-1]
-
-def IsBoneHierarchySingleRoot(lBone):
-    if not len(lBone): return True
-    par = RecursiveParentRoot(lBone[0].parent_recursive)
-    for b in lBone:
-        if RecursiveParentRoot(b.parent_recursive) != par:
-            return False
-    return True
-
-def ListGetMapId(l):
-    mapIdElt = dict(enumerate(l))
-    mapEltId = dict([(b, a) for a, b in mapIdElt.items()])
     
-    return [mapIdElt, mapEltId]
-
-def ListGetIdParentBlenderSpecial(lObject): return ListGetIdParentBlenderSpecialCheck(lObject, lambda x: True)
-def ListGetIdParentBlenderSpecialCheck(lObject, fChecker):
-    """For Blender Objects (Used for Node, Bone)
-         Assuming x in lObject:
-         x.parent == None if no parent (Is a root)
-                  else is another member of lObject
-       Id is set to -1 in case of no parent"""
-    mapIdElt, mapEltId = ListGetMapId(lObject)
-    
-    lIdParent = []
-    
-    for o in lObject:
-        assert o in mapEltId
-        assert o.parent == None or o.parent in mapEltId
-        
-        assert fChecker(o)
-        
-        if o.parent == None:
-            lIdParent.append(-1)
-        else:
-            lIdParent.append(mapEltId[o.parent])
-            
-    return lIdParent
-
-def GetBoneVertexGroupIdx(oMesh, bone):
-    for g in oMesh.vertex_groups:
-        if g.name == bone.name:
-            return g.index
-    return None
-
-def MakeMapVGIdxBoneId(oMesh, lBone):
-    """ @lBone: Bone list of Mesh modifiering Armature.
-        @Return: { Blender internal index of vertex_group : lBone-Local ID }
-                 No key   for vertex_group not matched by any Bone
-                 No value for bone         not matched by any vertex_group
-    """
-    lVGIdx = [GetBoneVertexGroupIdx(oMesh, b) for b in lBone]
-    assert lUniqP(lFilter(lVGIdx, f=lambda x: x is not None))
-    mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
-    if None in mapVGIdxBoneId: del mapVGIdxBoneId[None]
-    return mapVGIdxBoneId
-
-class BId:
-    def __init__(self, oMesh, lBone, mapIdBone, mapBoneId, lVGIdx, mapVGIdxBoneId):
-        self.oMesh = oMesh
-        self.lBone = lBone
-        self.mapIdBone = mapIdBone
-        self.mapBoneId = mapBoneId
-        self.lVGIdx = lVGIdx
-        self.mapVGIdxBoneId = mapVGIdxBoneId
-
-    @classmethod
-    def MakeBoneId(klass, oMesh, lBone):
-        """ Not super useful. Bone IDs gotten thus are local to mesh instead of global """
-        mapIdBone, mapBoneId = BId.BoneGetMapId(lBone)
-        
-        lVGIdx = [GetBoneVertexGroupIdx(oMesh, x) for x in lBone]
-        mapVGIdxBoneId = dict([(b, a) for a, b in enumerate(lVGIdx)])
-        
-        return BId(oMesh, lBone, mapBoneId, mapIdBone, lVGIdx, mapVGIdxBoneId)
-
-    @classmethod
-    def BoneGetMapId(klass, lBone):
-        return ListGetMapId(lBone)
-    
-    @classmethod
-    def BidGetIdParent(klass, lBid):
-        lBone = [b for bid in lBid for b in bid.lBone]
-        # Had the "or x.parent_type == 'BONE'" check, but seems Bones do not have parent_type (Objects do)
-        return ListGetIdParentBlenderSpecialCheck(lBone, lambda x: True if x.parent == None or True else False)
-
-def GetWeights(bid):
-    llIF = [[] for x in range(len(bid.lBone))]
-    
-    dMesh = bid.oMesh.data
-    
-    for vI, v in enumerate(dMesh.vertices):
-        assert v.index == vI # Very surprising if not. Expecting the vertices array to be stored in sequential index order
-        for g in v.groups:
-            inflBoneId = bid.mapVGIdxBoneId[g.group]
-            assert inflBoneId is not None
-            llIF[inflBoneId].append([v.index, g.weight])
-
-    return llIF
-
-def GetWeightsEx(oMesh, lBone):
-    """ @lBone: Bone list of Mesh modifiering Armature.
-        @Return: [#VertexN, ...]
-                    #VertexN: [[lBone-Local Bone index, Weight of VertexN], ...]
-        = Relevant Blender data structures =
-            == Conceptual workflow and common sense ==
-                Blender UI vertex_group editing workflow:
-                    - Select vertex_group to work on
-                    - Modify vertex weights in Weight Paint mode
-                You would therefore expect oMesh.vertex_groups[N] objects to store
-                a list of vertices and their assigned weights: [(VertexN, Weight), ...].
-            == Rant ==
-                However, contrasting the usual Blender convention where the UI team is a pile of ferrets with rabbies
-                and the coders try there best to offset the handicap, their roles seem to have formerly reversed.
-                
-                Data rightfully beloning in oMesh.vertex_groups[N] instead has to be recovered out of oMesh.data.vertices[N].
-                Storage is:             vertex       -> list of influencing vertex_groups
-                Instead of the natural: vertex_group -> list of influenced vertices            
-            == Rationale ==
-                The reason why this reversal makes sense is the data format expected by a hardware skinning shader:
-                    in ivec4 BoneId
-                    in  vec4 BoneWt
-                Bone indices and weights are passed per-vertex.
-        = Matching =
-            bone.name              <-> vertex_groups[N].name     # By string
-            vertex_groups[N].index <-> vertex[N].groups[M].group # By ID
-            
-            The above paths may be traversed forward/backward to obtain:
-                Bone   -> list of influenced vertices with their weights
-                vertex -> list of influencing Bones
-        = API Layout =
-            oMesh.vertex_groups[N].(name|index)
-                Vertex group name  is to be matched with Bone names
-                Vertex group index is to be matched with oMesh.data.vertices[N].groups[M].group            
-
-            oMesh.data.vertices[N].groups[M].(group|weight)
-                group is to be matched with oMesh.vertex_groups[N].index                
-    """
-    llIF = [[] for x in range(len(oMesh.data.vertices))]
-    
-    for v in oMesh.data.vertices:
-        for g in v.groups:
-            inflBoneId = mapVGIdxBoneId[g.group]
-    
-    mapVGIdxBoneId = MakeMapVGIdxBoneId()
-
-    # Check sequentialness of dMesh.vertices[n].index
-    assert lSequentialEquiv([v.index for v in dMesh.vertices])
-    
-    for v in oMesh.data.vertices:
-        for g in v.groups:
-            inflBoneId = mapVGIdxBoneId[g.group]
-            if inflBoneId:
-                llIF[inflBoneId].append([v.index, g.weight])
-    
-    assert 0
-
-def GetVerts(bid): return dMeshGetVerts(bid.oMesh.data)
-def dMeshGetVerts(dMesh):
-    lVert = []
-    
-    for vI, v in enumerate(dMesh.vertices):
-        assert v.index == vI
-        lVert.extend([v.co[0], v.co[1], v.co[2]])
-    
-    return lVert
-
-    
-def GetIndices(bid): return dMeshGetIndices(bid.oMesh.data)
-def dMeshGetIndices(dMesh):
-    lIdx = []
-    
-    # FIXME: Will be using tessfaces, force recalculation if dirty
-    dMesh.update(calc_tessface=True)
-    assert not dMesh.validate()
-    
-    for f in dMesh.tessfaces:
-        assert len(f.vertices) == 3 or len(f.vertices) == 4
-        if len(f.vertices) == 3:
-            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
-        if len(f.vertices) == 4:
-            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
-            lIdx.extend([f.vertices[2], f.vertices[3], f.vertices[0]])
-            
-    return lIdx
-
-class BaseMesh:
-    @classmethod
-    def NodeGetMapId(klass, lAllNode):
-        """lAllNode: Combined MMesh, AMesh"""
-        assert all([isinstance(x, MMesh) or isinstance(x, AMesh) for x in lAllNode])
-        return ListGetMapId(lAllNode)
-        
-    @classmethod
-    def NodeGetIdParent(klass, lAllNode):
-        loMesh = [x.bid.oMesh for x in lAllNode]
-        return ListGetIdParentBlenderSpecialCheck(loMesh, lambda x: True if x.parent == None or x.parent_type == 'OBJECT' else False)
-    
-class MMesh:
-    def __init__(self, bid, vts, ics):
-        self.bid = bid
-        self.vts = vts
-        self.ics = ics
-
-def MeshMesh(oMesh):
-    vts = dMeshGetVerts(oMesh.data)
-    ics = dMeshGetIndices(oMesh.data)
-
-    class DummyBid:
-        def __init__(self, oMesh):
-            self.oMesh = oMesh
-    bid = DummyBid(oMesh)
-    
-    return MMesh(bid, vts, ics)
-
-class AMesh:
-    def __init__(self, bid, wts, vts, ics):
-        self.bid = bid
-        self.wts = wts
-        self.vts = vts
-        self.ics = ics
-
-def ArmaMesh(oMesh):
-    assert GetMeshArmature(oMesh) is not None
-    oArm = GetMeshArmature(oMesh)
-    dArm = oArm.data
-    lBone = [x for x in dArm.bones]
-    
-    bid = BId.MakeBoneId(oMesh, lBone)
-    
-    wts = GetWeights(bid)
-    vts = GetVerts(bid)
-    ics = GetIndices(bid)
-    
-    #assert IsBoneHierarchySingleRoot(lBone)
-    
-    return AMesh(bid, wts, vts, ics)
-
-def _BlendMatToListUnused(mat):
-    l = [float(e) for vec in mat for e in vec]
-    l = [(0.0 if abs(e) <= 0.0001 else e) for e in l]
-    return l
-
 def BlendMatToListColumnMajor(mat):
     assert len(mat.col) == 4 and len(mat.row) == 4
     l = []
     for col in range(len(mat.col)):
-        for row in range(len(mat.col)):
+        for row in range(len(mat.row)):
             l.append(mat[row][col])
     l = [(0.0 if abs(e) <= 0.0001 else e) for e in l]
     l = [float(e) for e in l]
@@ -599,107 +346,34 @@ def SceneMeshSelectAll():
 
 def MeshArmatureAll(oMesh):
     return [m.object for m in oMesh.modifiers if m.type == 'ARMATURE']
+
+def dMeshGetVerts(dMesh):
+    lVert = []
     
-OniDat = namedtuple('OniDat', ['o', 'n', 'i'])
-BniDat = namedtuple('BniDat', ['a', 'b', 'n', 'i'])
-
-class Oni:
-    def __init__(self, lOniDatUnsorted):
-        lOniDat      = sorted(lOniDatUnsorted, key=lambda x: x.i)
-        self.lOniDat = lOniDat
-        self.byId    = lOniDat
-        self.byName  = {t.n : t for t in lOniDat}
-        self.byObj   = {t.o : t for t in lOniDat}
-
-    @classmethod
-    def FromObject(klass, lO):
-        return Oni([OniDat(o, o.name, i) for i, o in enumerate(lO)])
-        
-    def GetIdParent(self):
-        def fOParentIndex(t):
-            assert t.o.parent == None or t.o.parent in self.byBoneObj
-            return t.o.parent is None and -1 or self.byObj[t.o.parent].i
-        return [fOParentIndex(t) for t in self.lOniDat]
-
-class Bni:
-    def __init__(self, lBoneOniDatUnsorted, lArmOniDatUnsorted):
-        lBoneOniDat = sorted(lBoneOniDatSorted, key=lambda x: x.i)
-        lArmOniDat = sorted(lArmOniDatSorted, key=lambda x: x.i)
-        self.lBoneOniDat = lBoneOniDat
-        self.lArmOniDat  = lArmOniDat
-        self.byBoneId    = lBoneOniDat
-        self.byArmId     = lArmOniDat
-        self.byBoneObj   = {t.o : t for t in lBoneOniDat}
-        
-    @classmethod
-    def FromOniArm(self, lOniArm):
-        lBone       = lFlatten([oni.o.data.bones              for oni in lOniArm])
-        lBoneArm    = lFlatten([[oni.o]*len(oni.o.data.bones) for oni in lOniArm])
-        lBoneOniDat = [BniDat(a, b, b.name, i) for i, (a, b) in enumerate(zip(lBoneArm, lBone))]
-        lArmOniDat  = [x for x in lOniArm.lOniDat]
-        return Bni(lBoneOniDat, lOniArm)
+    for vI, v in enumerate(dMesh.vertices):
+        assert v.index == vI
+        lVert.extend([v.co[0], v.co[1], v.co[2]])
     
-    def GetIdParent(self):
-        def fOParentIndex(t):
-            assert t.o.parent == None or t.o.parent in self.byBoneObj
-            return t.o.parent is None and -1 or self.byBoneObj[t.o.parent].i
-        return [fOParentIndex(t) for t in self.lBoneOniDat]
-
-def IdSubGen(lO, **kwargs):
-    assert 'f' in kwargs
-    dEltId = {}
-    curId = 0
-    for o in lO:
-        for sub in kwargs['f'](o):
-            if sub not in dEltId:
-                dEltId[sub] = curId
-                curId += 1
-    return dEltId
-
-def ObjIdSubGen(lO, **kwargs):
-    assert 'f' in kwargs
-    # Get Subs
-    tmpKwargs = [kwargs['f'](o) for o in lO]
-    # ID Subs
-    dSubId = IdSubGen(lO, f=kwargs['f'])
-    # Size retval
-    idObjSub = [[None for sub in kwa] for kwa in tmpKwargs]
-    # Apply ID to Subs
-    for i, kwa in enumerate(tmpKwargs):
-        for j, sub in enumerate(kwa):
-            idObjSub[i][j] = dSubId[sub]
-    return idObjSub
-
-def GetDiArmId(oMesh):
-    diArmId = IdSubGen(oMesh, f=MeshArmatureAll)
-    return diArmId
-
-def GetDiBoneId(oArm):
-    diArmId = IdSubGen(oArm, f=lambda a: a.data.bones)
-    return diArmId
-
-def GetIdMeshArm(oMesh):
-    idMeshArm = ObjIdSubGen(oMesh, f=MeshArmatureAll)
-    return idMeshArm
-
-def GetIdArmBone(oArm):
-    idArmBone = ObjIdSubGen(oArm, f=lambda a: a.data.bones)
-    return idArmBone
-
-def GetIdParent(lObj, lId, lName):
-    assert lUniq(lName)
-    lParentName = [o.parent and o.parent.name for o in lObj]
-    diNameId = {name : id for name, id in zip(lName, lId)}
-    diNameId[None] = -1     # Roots get -1
-    return [diNameId[n] for n in lParentName]
-
-def GetIdParentMesh(lMeshObj, lMeshId, lMeshName):
-    return GetIdParent(lMeshObj, lMeshId, lMeshName)
-
-def GetIdParentArmBone(lArmBoneObj, lArmBoneId, lArmBoneName):
-    return GetIdParent(lArmBoneObj, lArmBoneId, lArmBoneName)
-
-def GetWeightsEx2(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
+    return lVert
+    
+def dMeshGetIndices(dMesh):
+    lIdx = []
+    
+    # FIXME: Will be using tessfaces, force recalculation if dirty
+    dMesh.update(calc_tessface=True)
+    assert not dMesh.validate()
+    
+    for f in dMesh.tessfaces:
+        assert len(f.vertices) == 3 or len(f.vertices) == 4
+        if len(f.vertices) == 3:
+            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
+        if len(f.vertices) == 4:
+            lIdx.extend([f.vertices[0], f.vertices[1], f.vertices[2]])
+            lIdx.extend([f.vertices[2], f.vertices[3], f.vertices[0]])
+            
+    return lIdx
+    
+def GetWeights(oMesh, lMeshAllArmBoneId, lMeshAllArmBoneName):
     #FIXME: For the case of a mesh with no Bones
     
     def GetBoneVertexGroupIdx(oMesh, boneName):
@@ -796,6 +470,7 @@ def Br3():
     def QueryC_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
     def QueryL_tlMA_idM(idM): return GenQueryCompositeL_tbl_lAttr_lVal(tlMA, ['idM'], [idM])
     def QueryL_tlBA_idA(idA): return GenQueryCompositeL_tbl_lAttr_lVal(tlBA, ['idA'], [idA])
+    def Query_tlBA_idB(idB): return GenQueryComposite_tbl_lAttr_lVal(tlBA, ['idB'], [idB])
         
     def tUniq(tbl, attrPlus):
         lAttr = attrPlus if isinstance(attrPlus, list) else [attrPlus]
@@ -829,17 +504,11 @@ def Br3():
     
     boneName = [m.B for m in tinorder(tB, 'id')]
     boneParent = [m.idP for m in tinorder(tBParent, 'id')]
-    #NOTE: Bone.matrix_local is in Armature space
-    boneMatrix = [m.oB.matrix_local for m in tinorder(tB, 'id')]
+    boneMatrix = [Query_tA_id(Query_tlBA_idB(m.id).idA).oA.matrix_world * m.oB.matrix_local for m in tinorder(tB, 'id')]
     
     meshVert  = [dMeshGetVerts(m.oM.data)   for m in tinorder(tM, 'id')]
     meshIndex = [dMeshGetIndices(m.oM.data) for m in tinorder(tM, 'id')]
-    
-    def my_range(start, end, step):
-        while start <= end:
-            yield start
-            start += step
-    
+        
     meshVertBoneWeight = []
     for m in tinorder(tM, 'id'):
         lMeshAllArmId = sorted([t.idA for t in QueryL_tlMA_idM(m.id)])
@@ -847,112 +516,20 @@ def Br3():
         lMeshAllArmBoneId   = [t.idB for t in tinorder(lMeshAllArmBonetlBA, 'idB')]
         lMeshAllArmBoneName = [Query_tB_id(t.idB).B for t in tinorder(lMeshAllArmBonetlBA, 'idB')]
         assert lUniqP(lMeshAllArmBoneName) and lUniqP(lMeshAllArmBoneName)
-        lAppendI(meshVertBoneWeight, GetWeightsEx2(m.oM, lMeshAllArmBoneId, lMeshAllArmBoneName))
+        lAppendI(meshVertBoneWeight, GetWeights(m.oM, lMeshAllArmBoneId, lMeshAllArmBoneName))
     
-                
-class Data:
-    def __init__(self):
-        lists = 'meshObj meshName meshArm armObj armName armBone boneObj boneName boneArmId'.split()
-        for l in lists:
-            setattr(self, l, [])
-
-def Br2():
-    assert BlendMatCheck()
     
-    d = Data()
-    
-    oMesh = SceneMeshSelectAll()
-    
-    idMeshArm = GetIdMeshArm(oMesh)
-    diArmId = GetDiArmId(oMesh)
-    diIdArm = dReversed(diArmId)
-    assert lSequentialEquiv(diIdArm.keys())
-    oArm = [diIdArm[x] for x in range(len(diIdArm.keys()))]
-    
-    linkMeshIdArmId = [(iM, idA) for iM, m in enumerate(idMeshArm) for idA in m]
-    
-    idArmBone = GetIdArmBone(oArm)
-    diBoneId = GetDiBoneId(oArm)
-    diIdBone = dReversed(diBoneId)
-    assert lSequentialEquiv(diIdBone.keys())
-    oBone = [diIdBone[x] for x in range(len(diIdBone.keys()))]
-    
-    assert lSequentialEquiv(lFlatten(idArmBone))
-    lBoneArmId = [iA for iA, a in enumerate(idArmBone) for idB in a]
-        
-    for i, m in enumerate(oMesh):
-        lAppendMultiI([d.meshObj, d.meshName, d.meshArm], [m, m.name, idMeshArm[i]])
-
-    for i, m in enumerate(oArm):
-        lAppendMultiI([d.armObj, d.armName, d.armBone], [m, m.name, idArmBone[i]])
-    
-    for i, m in enumerate(oBone):
-        lAppendMultiI([d.boneObj, d.boneName, d.boneArmId], [m, m.name, lBoneArmId[i]])
-
-    meshName   = d.meshName[:]
-    meshParent = GetIdParentMesh(d.meshObj, range(len(d.meshObj)), d.meshName)
-    meshMatrix = [m.matrix_local for m in d.meshObj]
-    
-    armName   = d.armName[:]
-    armMatrix = [m.matrix_world for m in d.armObj]
-    
-    boneName   = d.boneName[:]
-    boneParent = lFlatten([GetIdParentArmBone([d.boneObj[id] for id in a], a, [d.boneName[id] for id in a]) for a in idArmBone])
-    #NOTE: Bone.matrix_local is in Armature space
-    boneMatrix = [m.matrix_local for m in d.boneObj]
-        
-    meshVert  = [dMeshGetVerts(m.data)   for m in oMesh]
-    meshIndex = [dMeshGetIndices(m.data) for m in oMesh]
-    
-    meshVertBoneWeight = []
-    for i, m in enumerate(oMesh):
-        lMeshAllArmBoneId, lMeshAllArmBoneName = lUnzip([(j, d.boneName[j]) for j, b in enumerate(oBone) if (d.boneArmId[j] in idMeshArm[i])])
-        lAppendI(meshVertBoneWeight, GetWeightsEx2(m, lMeshAllArmBoneId, lMeshAllArmBoneName))
-    
-    """ Linking Mesh with Armature requires a different structure than linking Bone with Armature.
-        Because Mesh<->Arm is a n:m relationship but Arm<->Bone is a 1:n relationship
-    """
-    linkMeshIdArmId = linkMeshIdArmId
-    boneArmId       = lBoneArmId
-            
-    # FIXME: Bone global/local naming collisions
-    """
-    mesh0 vertex_groups Bone0 Bone1
-    arma0 influencing mesh0 bones Bone0
-    arma1 influencing mesh1 bones Bone1
-    This must not result result in Bone1 influencing mesh0
-    Bone names should not be global, they are naturally Armature-Local (Selection is Armature.Bone)
-    
-    Mesh with multiple influencing armatures:
-        Bone names required to be unique.
-        Blender not equipped with a disambiguation mechanism (vertex_groups[N].name is a bare Bone name - No Armature part)
-    Mesh with unrelated (non-influencing) armatures existing:
-        Bone names allowed to clash.
-        Implicit knowledge of Armature (vertex_groups[N].name is assumed to be one of the influencing Armatures)
-    """
-
     p = P()
-    
-    mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
-    mkIntSec(p, b"MESHPARENT", meshParent)
-    mkMatrixSec(p, b"MESHMATRIX", [BlendMatToList(m) for m in meshMatrix])
-    
-    mkLenDelSec(p, b"ARMNAME", [BytesFromStr(i) for i in armName])
-    mkMatrixSec(p, b"ARMMATRIX", [BlendMatToList(m) for m in armMatrix])
-    
-    mkLenDelSec(p, b"BONENAME", [BytesFromStr(i) for i in boneName])
-    mkIntSec(p, b"BONEPARENT", boneParent)
+
+    mkMatrixSec(p, b"MESHMATRIX", [BlendMatToList(m) for m in meshMatrix])    
     mkMatrixSec(p, b"BONEMATRIX", [BlendMatToList(m) for m in boneMatrix])
-    
     mkListFloatSec(p, b"MESHVERT", meshVert)
     mkListIntSec(p, b"MESHINDEX", meshIndex)
     mkListListPairIntFloatSec(p, b"MESHVERTBONEWEIGHT", meshVertBoneWeight)
     
-    mkPairIntSec(p, b"LINKMESHIDARMID", linkMeshIdArmId)
-    mkIntSec(p, b"BONEARMID", boneArmId)
-    
-    return p
-
+    dbg()
+    raise NotImplementedError()
+        
 def BlendRun():
     assert BlendMatCheck()
 
