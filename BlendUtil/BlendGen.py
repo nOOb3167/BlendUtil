@@ -467,6 +467,7 @@ def Br3():
     def Query_tA_id(id): return GenQuery_tbl_attr_val(tA, 'id', id)
     def Query_tA_A(A): return GenQuery_tbl_attr_val(tA, 'A', A)
     def Query_tB_id(id): return GenQuery_tbl_attr_val(tB, 'id', id)
+    def Query_tB_B(B): return GenQuery_tbl_attr_val(tB, 'B', B)
     def QueryC_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
     def QueryL_tlMA_idM(idM): return GenQueryCompositeL_tbl_lAttr_lVal(tlMA, ['idM'], [idM])
     def QueryL_tlBA_idA(idA): return GenQueryCompositeL_tbl_lAttr_lVal(tlBA, ['idA'], [idA])
@@ -484,8 +485,8 @@ def Br3():
     
     def Query_tlBA_idB(idB): return GenQuery_tbl_attr_val(tlBA, 'idB', idB)
     
-    tMParent = [TuptMParent(m.id, m.oM.parent and Query_tM_M(m.oM.parent.name) or -1)  for m in tM]
-    tBParent = [TuptBParent(m.id, m.oB.parent and Query_tlBA_idB(m.id) or -1)          for m in tB]
+    tMParent = [TuptMParent(m.id, Query_tM_M(m.oM.parent.name).id if m.oM.parent else -1)  for m in tM]
+    tBParent = [TuptBParent(m.id, Query_tB_B(m.oB.parent.name).id if m.oB.parent else -1)  for m in tB]
     
     tUniqI(tM, 'id')
     tUniqI(tA, 'id')
@@ -522,7 +523,7 @@ def Br3():
     p = P()
 
     mkLenDelSec(p, b"MESHNAME", [BytesFromStr(i) for i in meshName])
-    mkIntSec(p, b"MESHPARENT", boneParent)
+    mkIntSec(p, b"MESHPARENT", meshParent)
     mkMatrixSec(p, b"MESHMATRIX", [BlendMatToList(m) for m in meshMatrix])    
     
     mkLenDelSec(p, b"BONENAME", [BytesFromStr(i) for i in boneName])
@@ -532,7 +533,7 @@ def Br3():
     mkListFloatSec(p, b"MESHVERT", meshVert)
     mkListIntSec(p, b"MESHINDEX", meshIndex)
     mkListListPairIntFloatSec(p, b"MESHVERTBONEWEIGHT", meshVertBoneWeight)
-        
+    
     return p
         
 def BlendRun():

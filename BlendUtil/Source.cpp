@@ -490,23 +490,21 @@ void MultiRootMatrixAccumulateWorld(const vector<DMat> &mLocal, const vector<vec
 			MatrixAccumulateWorld(mLocal, child, i, root[i], oWorld);
 }
 
-void MatrixMeshToBone(const vector<int> &meshBoneCount, const vector<DMat> &nodeWorldMatrix, const vector<DMat> &boneWorldMatrix, vector<DMat> *oWorld) {
-	int numMesh = meshBoneCount.size();
-	assert(accumulate(meshBoneCount.begin(), meshBoneCount.end(), 0, [](int a, int x) { return a + x; }) == boneWorldMatrix.size());
+void MatrixMeshToBone(const vector<DMat> &meshWorldMatrix, const vector<DMat> &boneWorldMatrix, vector<vector<DMat> > *oWorld) {
+	int numMesh = meshWorldMatrix.size();
+	int numAllBone = boneWorldMatrix.size();
+
 	assert(oWorld->size() == boneWorldMatrix.size());
+	
+	vector<vector<DMat>> ret;
 
-	vector<DMat> ret;
-
-	int currBaseIdx = 0;
 	for (int m = 0; m < numMesh; m++) {
-		for (int b = 0; b < meshBoneCount[m]; b++) {
-			const DMat &mCurMeshWorld = nodeWorldMatrix[m];
-			const DMat &mCurBoneWorld = boneWorldMatrix[currBaseIdx + b];
-			const DMat mCurBoneWorldInv = DMat::InvertNs(mCurBoneWorld);
-			const DMat mMeshBone = DMat::Multiply(mCurMeshWorld, mCurBoneWorldInv);
-			ret.push_back(mMeshBone);
+		vector<DMat> v;
+		for (int b = 0; b < numAllBone; b++) {
+			const DMat mMeshBone = DMat::Multiply(meshWorldMatrix[m], DMat::InvertNs(boneWorldMatrix[b]));
+			v.push_back(mMeshBone);
 		}
-		currBaseIdx += meshBoneCount[m];
+		ret.push_back(v);
 	}
 
 	*oWorld = ret;
@@ -598,14 +596,14 @@ public:
 			FillLenDel(SectionGetByName(sec, "MESHVERTBONEWEIGHT").data, &mBWChunks);
 			/* MESHVERTBONEWEIGHT stored as flat (MeshN x VertOfMeshN) -> [pairIdWt, ...]
 			*  Accumulate-skip numVert[MeshN] entries to get to Mesh_{N+1} data. */
-			assert(mBWChunks.size() == accumulate(outSD->meshVert.begin(), outSD->meshVert.end(), 0, [](int a, const vector<float> &x) { return a + x.size(); }));
+			assert(mBWChunks.size() == accumulate(outSD->meshVert.begin(), outSD->meshVert.end(), 0, [](int a, const vector<float> &x) { return a + mNumVertFromSize(x.size()); }));
 
 			mVBWeightId = vector<vector<int> >(numMesh);
 			mVBWeightWt = vector<vector<float> >(numMesh);
 			for (int i = 0; i < numMesh; i++) {
 				int numVert = mNumVertFromSize(outSD->meshVert[i].size());
 				mVBWeightId[i] = vector<int>(BU_MAX_INFLUENCING_BONE * numVert);
-				mVBWeightId[i] = vector<int>(BU_MAX_INFLUENCING_BONE * numVert);
+				mVBWeightWt[i] = vector<float>(BU_MAX_INFLUENCING_BONE * numVert);
 			}
 
 			int currBaseIdx = 0;
