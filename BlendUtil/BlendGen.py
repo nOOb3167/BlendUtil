@@ -270,7 +270,7 @@ def lReduce(*args, **kwargs):
             return fuckoff
         except ImportError:
             return reduce
-    return fuckoff()(f, *args)
+    return list(fuckoff()(f, *args))
 
 def lCountOne(l, e, **kwargs):
     f = 'f' in kwargs and kwargs['f'] or (lambda x: x)
@@ -306,7 +306,7 @@ def lAppendMultiI(lL, lV):
 
 def lFilter(l, **kwargs):
     assert 'f' in kwargs
-    return filter(kwargs['f'], l)
+    return list(filter(kwargs['f'], l))
 
 def lIndexNestedN(lplus, n):
     assert n
@@ -409,14 +409,14 @@ def Br3():
             
     d = Data()
     
-    TupMab  = namedtuple('Mab', ['M', 'A', 'B', 'oM', 'oA', 'oB'])
+    TupMab  = namedtuple('Mab', ['M', 'A', 'B', 'oM', 'oA', 'oB', 'oPB'])
     TupMabM = namedtuple('MabM', ['M', 'oM'])
     TupMabA = namedtuple('MabA', ['A', 'oA'])
-    TupMabB = namedtuple('MabB', ['A', 'B', 'oB'])
+    TupMabB = namedtuple('MabB', ['A', 'B', 'oB', 'oPB'])
 
     TuptM = namedtuple('tM', ['id', 'M', 'oM'])
     TuptA = namedtuple('tA', ['id', 'A', 'oA'])
-    TuptB = namedtuple('tB', ['id', 'A', 'B', 'oB'])
+    TuptB = namedtuple('tB', ['id', 'A', 'B', 'oB', 'oPB'])
     
     TuptlMA = namedtuple('tlMA', ['idM', 'idA'])
     TuptlBA = namedtuple('tlBA', ['idB', 'idA'])
@@ -427,19 +427,26 @@ def Br3():
     lMab = []
     for m in SceneMeshSelectAll():
         for a in MeshArmatureAll(m):
-            for b in a.data.bones:
-                lAppendI(lMab, TupMab(m.name, a.name, b.name, m, a, b))
+            assert lUniqP(a.data.bones, f=lambda b: b.name)
+            def _BlendPoseBoneToBone(pb):
+                # Check PoseBone belongs to currently processed armature
+                assert pb.id_data and pb.id_data.type == 'ARMATURE' and pb.id_data.name == a.name
+                # Match PoseBone with associated Bone by name
+                bone = lFilter(a.data.bones, f=lambda x: x.name == pb.name); assert len(bone) == 1
+                return bone[0]
+            for pb in a.pose.bones:
+                lAppendI(lMab, TupMab(m.name, a.name, pb.name, m, a, _BlendPoseBoneToBone(pb), pb))
     
     def MabTrimM(): return lMap(lUniq(lMab, f=lambda x: x.M), f=lambda x: TupMabM(x.M, x.oM))
     def MabTrimA(): return lMap(lUniq(lMab, f=lambda x: x.A), f=lambda x: TupMabA(x.A, x.oA))
-    def MabTrimB(): return lMap(lUniq(lMab, f=lambda x: (x.A, x.B)), f=lambda x: TupMabB(x.A, x.B, x.oB))
+    def MabTrimB(): return lMap(lUniq(lMab, f=lambda x: (x.A, x.B)), f=lambda x: TupMabB(x.A, x.B, x.oB, x.oPB))
     lMabM = MabTrimM()
     lMabA = MabTrimA()
     lMabB = MabTrimB()
     
     tM = [TuptM(i, m.M, m.oM)      for i, m in enumerate(lMabM)]
     tA = [TuptA(i, m.A, m.oA)      for i, m in enumerate(lMabA)]
-    tB = [TuptB(i, m.A, m.B, m.oB) for i, m in enumerate(lMabB)]
+    tB = [TuptB(i, m.A, m.B, m.oB, m.oPB) for i, m in enumerate(lMabB)]
 
     def tinorder(t, attrPlus):
         lAttr = attrPlus if isinstance(attrPlus, list) else [attrPlus]
