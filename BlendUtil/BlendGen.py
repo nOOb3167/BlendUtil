@@ -475,10 +475,11 @@ def Br3():
     def Query_tA_A(A): return GenQuery_tbl_attr_val(tA, 'A', A)
     def Query_tB_id(id): return GenQuery_tbl_attr_val(tB, 'id', id)
     def Query_tB_B(B): return GenQuery_tbl_attr_val(tB, 'B', B)
-    def QueryC_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
+    def Query_tB_AB(AB): return GenQueryComposite_tbl_lAttr_lVal(tB, ['A', 'B'], AB)
     def QueryL_tlMA_idM(idM): return GenQueryCompositeL_tbl_lAttr_lVal(tlMA, ['idM'], [idM])
     def QueryL_tlBA_idA(idA): return GenQueryCompositeL_tbl_lAttr_lVal(tlBA, ['idA'], [idA])
     def Query_tlBA_idB(idB): return GenQueryComposite_tbl_lAttr_lVal(tlBA, ['idB'], [idB])
+    def Query_tAnim_Anim(anim): return GenQueryComposite_tbl_lAttr_lVal(tAnim, ['Anim'], [anim])
         
     def tUniq(tbl, attrPlus):
         lAttr = attrPlus if isinstance(attrPlus, list) else [attrPlus]
@@ -488,9 +489,7 @@ def Br3():
         return tbl
         
     tlMA = [TuptlMA(Query_tM_M(m.M).id, Query_tA_A(m.A).id) for m in lMab]
-    tlBA = [TuptlBA(QueryC_tB_AB([m.A, m.B]).id, Query_tA_A(m.A).id) for m in lMab]
-    
-    def Query_tlBA_idB(idB): return GenQuery_tbl_attr_val(tlBA, 'idB', idB)
+    tlBA = [TuptlBA(Query_tB_AB([m.A, m.B]).id, Query_tA_A(m.A).id) for m in lMab]
     
     tMParent = [TuptMParent(m.id, Query_tM_M(m.oM.parent.name).id if m.oM.parent else -1)  for m in tM]
     tBParent = [TuptBParent(m.id, Query_tB_B(m.oB.parent.name).id if m.oB.parent else -1)  for m in tB]
@@ -526,6 +525,61 @@ def Br3():
         assert lUniqP(lMeshAllArmBoneName) and lUniqP(lMeshAllArmBoneName)
         lAppendI(meshVertBoneWeight, GetWeights(m.oM, lMeshAllArmBoneId, lMeshAllArmBoneName))
     
+    ######
+    ######
+
+    def SceneActionGetAll():
+        return [x for x in bpy.data.actions]
+    def SceneArmatureGetAll():
+        return [x for x in bpy.data.armatures]
+
+    # FIXME: Likely want only Armatures reachable from SceneMeshSelectAll
+    oAct = SceneActionGetAll()
+    oArm = SceneArmatureGetAll()
+    
+    assert len(oAct) == 1
+    assert len(oArm) == 1
+    
+    def GetAnimByMatchName(oAct):
+        def GetDataPathEltName(blenderDataPath):
+            import re
+            rq = re.search(r"""(?P<prefix>pose\.bones)
+                              \["(?P<name>(\w|\s|\.)+)"\]
+                              \.(?P<tag>\w+)""", blenderDataPath, re.VERBOSE)
+            assert rq # FIXME: P<name> part format: Currently accepts chars, spaces and dots.
+            r = rq.groupdict()
+            assert len(r['name']) and r['tag'] in ['location', 'rotation_quaternion', 'scale']
+            return r['name']
+        
+        ActInflu = namedtuple('ActInflu', ['animName', 'armName', 'lChanName'])
+        ret = []
+        for act in oAct:
+            import re
+            rq = re.search(r"""(?P<animName>\w+)_(?P<armName>\w+)
+                               (?P<rest>(\..*)?)""", act.name, re.VERBOSE)
+            assert rq       # FIXME: Actions with nonmatching names are maybe not meant to be exported
+            r = rq.groupdict()
+            assert len(r['animName']) and len(r['armName'])
+            lChanNameAll = [GetDataPathEltName(fc.data_path) for fc in act.fcurves]
+            lChanName    = lUniq(lChanNameAll)      # FCurves ending in .location .whatever got the same chan name
+            lAppendI(ret, ActInflu(r['animName'], r['armName'], lChanName))
+        return ret
+    
+    TuptAnim     = namedtuple('tAnim',     ['id', 'Anim'])
+    TuptlAnimArmChan = namedtuple('tAnimChan', ['idAnim', 'idA', 'idB'])
+    
+    allAnim = GetAnimByMatchName(oAct)
+    
+    tAnim = [TuptAnim(i, m.animName) for i, m in enumerate(lUniq(allAnim, f=lambda x: x.animName))]
+    tlAnimArmChan = [TuptlAnimArmChan(Query_tAnim_Anim(m.animName).id, Query_tA_A(m.armName).id, Query_tB_AB([m.armName, c]).id) for m in allAnim for c in m.lChanName]
+    
+    # FIXME: Blender global side effect
+#    for t in tinorder(tA, 'id'):
+#        assert t.oA.pose_position == 'REST'
+#        a.pose_position = 'POSE'
+        
+    ######
+    ######
     
     p = P()
 
